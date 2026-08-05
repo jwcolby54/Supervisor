@@ -22,19 +22,22 @@ The supervised fleet includes:
 - song hydrator submit/collect
 - song Last.fm submit/collect
 - artist hydrator submit/collect
-- artist Last.fm submit/collect
 - `music_explorer_pg`
 - `graph_explorer_pg`
 - `cloudflared_tunnel`
+
+Live `/ops` verification on 2026-08-05 shows this deployed set. The artist
+Last.fm submit/collect pair is not currently exposed there as a live supervised
+part.
 
 ## Known Nuance To Keep Straight
 
 There are two different truths in the repo if you only read one file:
 
 - `install_service.py` still represents the initial bootstrap install step and
-  writes a bootstrap `VAULT_TOKEN` env var
+ writes a bootstrap `VAULT_TOKEN` env var
 - `elevated_activate.ps1` represents the current intended deployed state and
-  removes that token, leaving only `VAULT_ADDR`
+ removes that token, leaving only `VAULT_ADDR`
 
 So documentation should describe the staged flow, not either file in isolation.
 
@@ -47,4 +50,4 @@ These are deliberate design choices, not missing work:
 - bounded probes instead of persistent DB/Vault sessions inside the supervisor
 - local file-based maintenance/reload flags instead of DB-owned control flags
 - separate `unseal_vault.py` helper instead of storing the unseal key in the
-  long-lived supervisor process
+ long-lived supervisor process

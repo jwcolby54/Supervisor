@@ -113,16 +113,16 @@ It exists so `supervisor.py` itself stays credential-free.
 These files together explain the full service lifecycle:
 
 - `install_service.py`
-  - initial nssm registration
-  - still writes a bootstrap `VAULT_TOKEN` env var
+ - initial nssm registration
+ - still writes a bootstrap `VAULT_TOKEN` env var
 - `export_secrets.py`
-  - reads the interactive user's keyring
+ - reads the interactive user's keyring
 - `system_keyring_populate.py`
-  - writes those secrets into LocalSystem's keyring
+ - writes those secrets into LocalSystem's keyring
 - `elevated_populate.ps1`
-  - orchestrates the export -> SYSTEM populate bridge flow
+ - orchestrates the export -> SYSTEM populate bridge flow
 - `elevated_activate.ps1`
-  - removes the plaintext token from the service env and restarts the service
+ - removes the plaintext token from the service env and restarts the service
 
 That staged flow matters. The current intended deployed state is after
 activation, not just after installation.
@@ -133,8 +133,8 @@ activation, not just after installation.
 - `logs\service_stdout.log`
 - `logs\service_stderr.log`
 - one stable log per supervised part, for example:
-  - `logs\mbqueue_worker.log`
-  - `logs\fmqueue_api.log`
-  - `logs\song_hydrator_collect.log`
-  - `logs\artist_lastfm_collect.log`
-  - `logs\graph_explorer_pg.log`
+ - `logs\mbqueue_worker.log`
+ - `logs\fmqueue_api.log`
+ - `logs\song_hydrator_collect.log`
+ - `logs\artist_lastfm_collect.log`
+ - `logs\graph_explorer_pg.log`

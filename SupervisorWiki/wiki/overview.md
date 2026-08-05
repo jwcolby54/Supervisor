@@ -47,21 +47,24 @@ The fleet now includes:
 One owned supervisor is simpler and safer than re-creating those start/restart
 rules in multiple launchers or asking the operator to remember them.
 
+This is the current deployed shape, not just source intent. The live MyMusic
+ops surface reports these parts under the running `MusicAppSupervisor` service.
+
 ## The Shape Of The System
 
 At runtime the supervisor is one long-lived Python process plus a small set of
 bounded helper scripts:
 
 1. `supervisor.py` holds the part registry, dependency probes, startup gating,
-   restart loop, maintenance/reload handling, and child process ownership.
+ restart loop, maintenance/reload handling, and child process ownership.
 2. Helper probes report health without giving the supervisor its own long-lived
-   DB or Vault session.
+ DB or Vault session.
 3. `set_maintenance.py` manipulates local control flags that the supervisor
-   consumes.
+ consumes.
 4. `verify_boot.py` gives the operator one post-boot health report.
 5. Bootstrap/activation helpers provision the LocalSystem keyring and switch
-   the service from the initial install state to the current keyring-backed
-   state.
+ the service from the initial install state to the current keyring-backed
+ state.
 
 The service identity is `LocalSystem`. Secrets are intended to live in
 LocalSystem's keyring, not in the service registry config, after activation.
@@ -82,11 +85,12 @@ Owned parts include:
 - `song_lastfm_collect`
 - `artist_hydrator_submit`
 - `artist_hydrator_collect`
-- `artist_lastfm_submit`
-- `artist_lastfm_collect`
 - `music_explorer_pg`
 - `graph_explorer_pg`
 - `cloudflared_tunnel`
+
+The current live `/ops` surface reports this deployed set. The artist Last.fm
+submit/collect pair is not currently exposed there as a live supervised part.
 
 ## Implementation Files
 
