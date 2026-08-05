@@ -12,6 +12,8 @@ If you are not sure where to begin, start at [[quick_start]].
   people trying to understand the service shape quickly
 - [[overview]] -- what the supervisor is, what it owns, and how it relates to
   MyMusic, MBQueue, FMQueue, Vault, and PostgreSQL
+- [[maintenance]] -- local maintenance checklist for Supervisor plus the
+  pointer back to the shared fleet runbook in the MyMusic wiki
 - [[operations_runbook]] -- operator-first startup checks, restart flows, and
   maintenance/reload control
 - [[status]] -- current implementation state and known doc/code nuances
