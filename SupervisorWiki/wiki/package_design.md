@@ -27,6 +27,25 @@ Open this before code diving.
 | `disable_fast_startup.ps1` | One-time host setting helper used during cold-boot validation |
 | `test_restart.py` | Restart/proof helper for service recovery testing |
 
+## AI Maintenance Hotspots
+
+These files are the fastest route to the real control points:
+
+- `supervisor.py`
+ - part registry, startup gating, restart logic, child ownership
+- `set_maintenance.py`
+ - disable/enable/reload control plane
+- `probe_worker_status.py`
+ - worker heartbeat/progress wedge logic
+- `read_supervisor_sysvars.py`
+ - runtime tuning overrides read from MyMusic sysvars
+- `verify_boot.py`
+ - end-to-end post-boot verifier
+- `unseal_vault.py`
+ - separate Vault unseal path used by the supervisor
+- `elevated_activate.ps1`
+ - transition from bootstrap token state to keyring-only runtime
+
 ## `supervisor.py`
 
 This is the real heart of the project.

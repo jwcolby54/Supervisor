@@ -24,6 +24,24 @@ Read:
 
 1. [[package_design]]
 
+### Debug restart, control-flag, or health-probe behavior fast
+
+Read:
+
+1. [[package_design]]
+2. [[operations_runbook]]
+3. [[overview]]
+
+Check these files early instead of grepping blindly:
+
+- `E:\DevPython\DataSourceQueue\Supervisor\supervisor.py`
+- `E:\DevPython\DataSourceQueue\Supervisor\set_maintenance.py`
+- `E:\DevPython\DataSourceQueue\Supervisor\probe_worker_status.py`
+- `E:\DevPython\DataSourceQueue\Supervisor\read_supervisor_sysvars.py`
+- `E:\DevPython\DataSourceQueue\Supervisor\verify_boot.py`
+- `E:\DevPython\DataSourceQueue\Supervisor\unseal_vault.py`
+- `E:\DevPython\DataSourceQueue\Supervisor\elevated_activate.ps1`
+
 ### Understand how MyMusic uses this project
 
 Read:

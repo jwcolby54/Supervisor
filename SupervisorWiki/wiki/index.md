@@ -23,6 +23,17 @@ If you are not sure where to begin, start at [[quick_start]].
 - [[package_design]] -- every script in `Supervisor\`, what it owns, and how the
  pieces fit together
 
+## AI Maintenance Hotspots
+
+Open these first when the task is "fix supervised-runtime behavior" rather than
+"read the whole project":
+
+- [[quick_start]] -- scenario router
+- [[overview]] -- ownership boundary and live fleet shape
+- [[package_design]] -- exact file ownership
+- [[operations_runbook]] -- operator control flows and log locations
+- [[status]] -- current build/runtime nuance only
+
 ## Related Projects
 
 - MyMusic integration/deployment view:
