@@ -29,6 +29,9 @@ HYDRATOR_PARTS = [
     "artist_hydrator_collect",
     "artist_lastfm_submit",
     "artist_lastfm_collect",
+    "album_hydrator_submit",
+    "album_hydrator_collect",
+    "album_hydrator_hydrate",
 ]
 
 

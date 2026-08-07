@@ -502,6 +502,88 @@ PARTS: list[PartSpec] = [
             "1800",
         ],
     ),
+    # Album tracklist lane (MB-only). Three stages: submit enqueues release-group
+    # lookups, collect drains ready MBQueue responses, hydrate chains the release
+    # lookup and caches tracklists into crawler song works. Started submit ->
+    # collect -> hydrate so each downstream stage has an upstream already live.
+    PartSpec(
+        name="album_hydrator_submit",
+        cwd=MYMUSIC_CRAWLER_DIR,
+        argv=[
+            PYTHON,
+            str(MYMUSIC_CRAWLER_DIR / "MT_album_hydrator.py"),
+            "--submit",
+            "--loop",
+            "--batch-limit",
+            "100",
+            "--sleep-seconds",
+            "15",
+        ],
+        cmdline_match="MT_album_hydrator.py --submit --loop",
+        requires=("vault", "postgres"),
+        probe_argv=[
+            PYTHON,
+            str(WORKER_STATUS_PROBE),
+            "--part-name",
+            "MT_album_hydrator_submit",
+            "--heartbeat-max-seconds",
+            "180",
+            "--progress-max-seconds",
+            "1800",
+        ],
+    ),
+    PartSpec(
+        name="album_hydrator_collect",
+        cwd=MYMUSIC_CRAWLER_DIR,
+        argv=[
+            PYTHON,
+            str(MYMUSIC_CRAWLER_DIR / "MT_album_hydrator.py"),
+            "--collect",
+            "--loop",
+            "--batch-limit",
+            "100",
+            "--sleep-seconds",
+            "15",
+        ],
+        cmdline_match="MT_album_hydrator.py --collect --loop",
+        requires=("vault", "postgres"),
+        probe_argv=[
+            PYTHON,
+            str(WORKER_STATUS_PROBE),
+            "--part-name",
+            "MT_album_hydrator_collect",
+            "--heartbeat-max-seconds",
+            "180",
+            "--progress-max-seconds",
+            "1800",
+        ],
+    ),
+    PartSpec(
+        name="album_hydrator_hydrate",
+        cwd=MYMUSIC_CRAWLER_DIR,
+        argv=[
+            PYTHON,
+            str(MYMUSIC_CRAWLER_DIR / "MT_album_hydrator.py"),
+            "--hydrate",
+            "--loop",
+            "--batch-limit",
+            "100",
+            "--sleep-seconds",
+            "15",
+        ],
+        cmdline_match="MT_album_hydrator.py --hydrate --loop",
+        requires=("vault", "postgres"),
+        probe_argv=[
+            PYTHON,
+            str(WORKER_STATUS_PROBE),
+            "--part-name",
+            "MT_album_hydrator_hydrate",
+            "--heartbeat-max-seconds",
+            "180",
+            "--progress-max-seconds",
+            "1800",
+        ],
+    ),
     # Public web presence. Both apps self-bootstrap their sys.path and gate the
     # supervisor's startup on a real /health probe, so their DB init is fully
     # serialized (avoids the dynamic-cred cache race). cloudflared starts LAST so

@@ -85,12 +85,22 @@ Owned parts include:
 - `song_lastfm_collect`
 - `artist_hydrator_submit`
 - `artist_hydrator_collect`
+- `artist_lastfm_submit`
+- `artist_lastfm_collect`
+- `album_hydrator_submit`
+- `album_hydrator_collect`
+- `album_hydrator_hydrate`
 - `music_explorer_pg`
 - `graph_explorer_pg`
 - `cloudflared_tunnel`
 
-The current live `/ops` surface reports this deployed set. The artist Last.fm
-submit/collect pair is not currently exposed there as a live supervised part.
+The album hydrator lane is a full supervised member as of 2026-08-06 (the
+three-stage MB-only album tracklist lane; see the MyMusic
+`queue_async_hydration_model` and `music_explorer_pg` pages).
+
+The live `/ops` surface reports the queue, hydrator, and web parts. Note the
+`/ops` page's own `OPS_PARTS` list does not currently expose the artist Last.fm
+submit/collect pair even though they are supervised parts here.
 
 ## Implementation Files
 
