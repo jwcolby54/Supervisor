@@ -3,7 +3,7 @@
 
 ## Build State
 
-As of 2026-08-05, the Supervisor project contains:
+As of 2026-08-06, the Supervisor project contains:
 
 - a working supervisor loop in `supervisor.py`
 - local control-plane tooling in `set_maintenance.py`
@@ -15,20 +15,25 @@ As of 2026-08-05, the Supervisor project contains:
 
 ## Current Runtime Shape
 
-The supervised fleet includes:
+The supervised fleet is the `PARTS` registry in `supervisor.py`. As of
+2026-08-06 it holds 18 parts:
 
 - MBQueue worker + API
 - FMQueue worker + API
 - song hydrator submit/collect
 - song Last.fm submit/collect
 - artist hydrator submit/collect
+- artist Last.fm submit/collect
+- album hydrator submit/collect/hydrate (three-stage MB-only album tracklist
+ lane, added 2026-08-06)
 - `music_explorer_pg`
 - `graph_explorer_pg`
 - `cloudflared_tunnel`
 
-Live `/ops` verification on 2026-08-05 shows this deployed set. The artist
-Last.fm submit/collect pair is not currently exposed there as a live supervised
-part.
+Treat `supervisor.py` `PARTS`, not `/ops`, as the authority on what is
+supervised. The live MyMusic `/ops` surface reports the queue, hydrator, and
+web parts, but its own `OPS_PARTS` list does not currently expose the artist
+Last.fm submit/collect pair even though they are supervised here.
 
 ## Known Nuance To Keep Straight
 
