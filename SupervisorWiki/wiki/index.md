@@ -8,8 +8,12 @@ If you are not sure where to begin, start at [[quick_start]].
 
 ### Start here
 
+- [[ai_wiki_contract]] -- local adoption of the shared AI wiki standard:
+ wiki-first teaching, code-final verification, and complete module coverage
 - [[quick_start]] -- scenario-based chooser for operators, app integrators, and
  people trying to understand the service shape quickly
+- [[module_inventory]] -- complete inventory of the current Supervisor Python
+ code root
 - [[overview]] -- what the supervisor is, what it owns, and how it relates to
  MyMusic, MBQueue, FMQueue, Vault, and PostgreSQL
 - [[maintenance]] -- local maintenance checklist for Supervisor plus the
@@ -22,6 +26,8 @@ If you are not sure where to begin, start at [[quick_start]].
 
 - [[package_design]] -- every script in `Supervisor\`, what it owns, and how the
  pieces fit together
+- [[module_inventory]] -- completeness backstop so every current Supervisor
+ Python file is named somewhere in the wiki
 
 ## AI Maintenance Hotspots
 

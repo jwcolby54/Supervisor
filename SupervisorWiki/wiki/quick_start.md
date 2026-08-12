@@ -9,7 +9,8 @@ Read:
 
 1. [[overview]]
 2. [[package_design]]
-3. [[status]]
+3. [[module_inventory]]
+4. [[status]]
 
 ### Restart or verify the always-on fleet
 
@@ -17,12 +18,14 @@ Read:
 
 1. [[operations_runbook]]
 2. [[package_design]]
+3. [[module_inventory]]
 
 ### Find which script owns a specific behavior
 
 Read:
 
 1. [[package_design]]
+2. [[module_inventory]]
 
 ### Debug restart, control-flag, or health-probe behavior fast
 
@@ -30,7 +33,8 @@ Read:
 
 1. [[package_design]]
 2. [[operations_runbook]]
-3. [[overview]]
+3. [[module_inventory]]
+4. [[overview]]
 
 Check these files early instead of grepping blindly:
 
