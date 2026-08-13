@@ -14,7 +14,10 @@ for _name in ("common", "pipeline", "crawler", "tools"):
     if _path.exists() and str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-from crawler_sysvars import resolve_supervisor_runtime_config  # noqa: E402
+from crawler_sysvars import (  # noqa: E402
+    resolve_supervisor_runtime_config,
+    seed_missing_supervisor_runtime_config,
+)
 from mymusic_vault import build_db_client  # noqa: E402
 
 
@@ -22,6 +25,10 @@ def main() -> int:
     db = build_db_client(project_label="Supervisor sysvar config reader")
     db.connect()
     try:
+        seed_missing_supervisor_runtime_config(
+            db,
+            updated_by="Supervisor sysvar config reader",
+        )
         config = resolve_supervisor_runtime_config(db)
         print(json.dumps(asdict(config)), flush=True)
         return 0

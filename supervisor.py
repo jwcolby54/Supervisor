@@ -24,7 +24,7 @@ Hard rules this file honors:
 Later parts (MyMusic Worker A/B, etc.) plug in by adding a row to PARTS. The
 supervisor reads durable health state only through bounded helper probes: queue
 workers publish `*.Worker.*` SysVars, and crawler workers publish
-`crawler.worker_status`.
+`CR_<Part>_Sta_*` SysVar flags through `probe_worker_status.py`.
 """
 
 from __future__ import annotations
@@ -89,6 +89,12 @@ BACKOFF_CAP_SECONDS = 60
 # How many consecutive failed health probes before an API part is judged wedged
 # and force-restarted even though its process is technically still alive.
 HEALTH_FAIL_LIMIT = 3
+DIAGNOSTIC_ENABLED = True
+DIAGNOSTIC_PERIODIC_SECONDS = 1800
+DIAGNOSTIC_TRIGGER_COOLDOWN_SECONDS = 300
+DIAGNOSTIC_MAX_RUNTIME_SECONDS = 900
+DIAGNOSTIC_TIMEOUT_SECONDS = 30
+DIAGNOSTIC_FIX_WAIT_SECONDS = 10
 
 
 # --------------------------------------------------------------------------- #
@@ -193,6 +199,9 @@ class PartSpec:
     # Infra dependencies (keys in INFRA_PROBES) that must pass before this part
     # is started, and that gate its restart too. Each part declares what it needs.
     requires: tuple[str, ...] = ()
+    # Runtime dependencies on other supervised parts by name. If an upstream
+    # dependency is down or unhealthy, this part is held down too.
+    requires_parts: tuple[str, ...] = ()
     # Optional bounded external probe command. It must print one JSON object
     # containing at least {"ok": bool, "reason": "..."}.
     probe_argv: Optional[list[str]] = None
@@ -204,6 +213,7 @@ FMQUEUE_DIR = DATASOURCE_ROOT / "FMQueue"
 MYMUSIC_ROOT = Path(r"E:\DevPython\MyMusicCollection")
 MYMUSIC_CRAWLER_DIR = MYMUSIC_ROOT / "ActiveCode" / "crawler"
 MYMUSIC_EXPLORER_DIR = MYMUSIC_ROOT / "ActiveCode" / "apps" / "music_explorer_pg"
+RUNTIME_OPS_SCRIPT = MYMUSIC_ROOT / "ActiveCode" / "tools" / "runtime_ops.py"
 WORKER_STATUS_PROBE = SUPERVISOR_DIR / "probe_worker_status.py"
 # Public web presence: the two Explorer apps and the Cloudflare tunnel that
 # fronts them. cloudflared runs under LocalSystem, so the config path must be
@@ -241,6 +251,7 @@ PARTS: list[PartSpec] = [
         cmdline_match="mbqueue.api_http",
         health_url=None,
         requires=("vault", "postgres"),
+        requires_parts=("mbqueue_worker",),
         probe_argv=[
             PYTHON,
             "-m",
@@ -281,6 +292,7 @@ PARTS: list[PartSpec] = [
         cmdline_match="fmqueue.api_http",
         health_url=None,
         requires=("vault", "postgres"),
+        requires_parts=("fmqueue_worker",),
         probe_argv=[
             PYTHON,
             "-m",
@@ -309,6 +321,7 @@ PARTS: list[PartSpec] = [
         ],
         cmdline_match="MT_songchart_harvester.py --hydrate-submit --loop",
         requires=("vault", "postgres"),
+        requires_parts=("mbqueue_api",),
         probe_argv=[
             PYTHON,
             str(WORKER_STATUS_PROBE),
@@ -335,6 +348,7 @@ PARTS: list[PartSpec] = [
         ],
         cmdline_match="MT_songchart_harvester.py --hydrate-collect --loop",
         requires=("vault", "postgres"),
+        requires_parts=("mbqueue_api",),
         probe_argv=[
             PYTHON,
             str(WORKER_STATUS_PROBE),
@@ -361,6 +375,7 @@ PARTS: list[PartSpec] = [
         ],
         cmdline_match="MT_songchart_harvester.py --lastfm-submit --loop",
         requires=("vault", "postgres"),
+        requires_parts=("fmqueue_api",),
         probe_argv=[
             PYTHON,
             str(WORKER_STATUS_PROBE),
@@ -387,6 +402,7 @@ PARTS: list[PartSpec] = [
         ],
         cmdline_match="MT_songchart_harvester.py --lastfm-collect --loop",
         requires=("vault", "postgres"),
+        requires_parts=("fmqueue_api",),
         probe_argv=[
             PYTHON,
             str(WORKER_STATUS_PROBE),
@@ -413,6 +429,7 @@ PARTS: list[PartSpec] = [
         ],
         cmdline_match="MT_artist_hydrator.py --hydrate-submit --loop",
         requires=("vault", "postgres"),
+        requires_parts=("mbqueue_api",),
         probe_argv=[
             PYTHON,
             str(WORKER_STATUS_PROBE),
@@ -439,6 +456,7 @@ PARTS: list[PartSpec] = [
         ],
         cmdline_match="MT_artist_hydrator.py --hydrate-collect --loop",
         requires=("vault", "postgres"),
+        requires_parts=("mbqueue_api",),
         probe_argv=[
             PYTHON,
             str(WORKER_STATUS_PROBE),
@@ -465,6 +483,7 @@ PARTS: list[PartSpec] = [
         ],
         cmdline_match="MT_artist_hydrator.py --lastfm-submit --loop",
         requires=("vault", "postgres"),
+        requires_parts=("fmqueue_api",),
         probe_argv=[
             PYTHON,
             str(WORKER_STATUS_PROBE),
@@ -491,6 +510,7 @@ PARTS: list[PartSpec] = [
         ],
         cmdline_match="MT_artist_hydrator.py --lastfm-collect --loop",
         requires=("vault", "postgres"),
+        requires_parts=("fmqueue_api",),
         probe_argv=[
             PYTHON,
             str(WORKER_STATUS_PROBE),
@@ -521,6 +541,7 @@ PARTS: list[PartSpec] = [
         ],
         cmdline_match="MT_album_hydrator.py --submit --loop",
         requires=("vault", "postgres"),
+        requires_parts=("mbqueue_api",),
         probe_argv=[
             PYTHON,
             str(WORKER_STATUS_PROBE),
@@ -547,6 +568,7 @@ PARTS: list[PartSpec] = [
         ],
         cmdline_match="MT_album_hydrator.py --collect --loop",
         requires=("vault", "postgres"),
+        requires_parts=("mbqueue_api",),
         probe_argv=[
             PYTHON,
             str(WORKER_STATUS_PROBE),
@@ -573,6 +595,7 @@ PARTS: list[PartSpec] = [
         ],
         cmdline_match="MT_album_hydrator.py --hydrate --loop",
         requires=("vault", "postgres"),
+        requires_parts=("mbqueue_api",),
         probe_argv=[
             PYTHON,
             str(WORKER_STATUS_PROBE),
@@ -611,6 +634,7 @@ PARTS: list[PartSpec] = [
         cmdline_match="tunnel run mymusic",
         health_url=None,
         requires=(),
+        requires_parts=("music_explorer_pg", "graph_explorer_pg"),
     ),
 ]
 
@@ -635,6 +659,17 @@ class PartState:
     # Last maintenance-disable note logged, to avoid loop spam while a part is
     # intentionally held down.
     maintenance_note: str = ""
+
+
+@dataclass
+class DiagnosticState:
+    """Live handle and bookkeeping for the bounded runtime diagnostic helper."""
+
+    proc: Optional[subprocess.Popen] = None
+    log_handle: object = field(default=None, repr=False)
+    launched_at: float = 0.0
+    last_launch_at: float = 0.0
+    last_reason: str = ""
 
 
 # --------------------------------------------------------------------------- #
@@ -683,6 +718,12 @@ def load_runtime_settings_from_sysvars() -> None:
     global BACKOFF_BASE_SECONDS
     global BACKOFF_CAP_SECONDS
     global HEALTH_FAIL_LIMIT
+    global DIAGNOSTIC_ENABLED
+    global DIAGNOSTIC_PERIODIC_SECONDS
+    global DIAGNOSTIC_TRIGGER_COOLDOWN_SECONDS
+    global DIAGNOSTIC_MAX_RUNTIME_SECONDS
+    global DIAGNOSTIC_TIMEOUT_SECONDS
+    global DIAGNOSTIC_FIX_WAIT_SECONDS
 
     try:
         completed = subprocess.run(
@@ -712,6 +753,16 @@ def load_runtime_settings_from_sysvars() -> None:
     BACKOFF_BASE_SECONDS = int(payload.get("backoff_base_seconds", BACKOFF_BASE_SECONDS))
     BACKOFF_CAP_SECONDS = int(payload.get("backoff_cap_seconds", BACKOFF_CAP_SECONDS))
     HEALTH_FAIL_LIMIT = int(payload.get("health_fail_limit", HEALTH_FAIL_LIMIT))
+    DIAGNOSTIC_ENABLED = bool(int(payload.get("diagnostic_enabled", int(DIAGNOSTIC_ENABLED))))
+    DIAGNOSTIC_PERIODIC_SECONDS = int(payload.get("diagnostic_periodic_seconds", DIAGNOSTIC_PERIODIC_SECONDS))
+    DIAGNOSTIC_TRIGGER_COOLDOWN_SECONDS = int(
+        payload.get("diagnostic_trigger_cooldown_seconds", DIAGNOSTIC_TRIGGER_COOLDOWN_SECONDS)
+    )
+    DIAGNOSTIC_MAX_RUNTIME_SECONDS = int(
+        payload.get("diagnostic_max_runtime_seconds", DIAGNOSTIC_MAX_RUNTIME_SECONDS)
+    )
+    DIAGNOSTIC_TIMEOUT_SECONDS = int(payload.get("diagnostic_timeout_seconds", DIAGNOSTIC_TIMEOUT_SECONDS))
+    DIAGNOSTIC_FIX_WAIT_SECONDS = int(payload.get("diagnostic_fix_wait_seconds", DIAGNOSTIC_FIX_WAIT_SECONDS))
     LOG.info("loaded supervisor runtime config from crawler.sysvar")
 
 
@@ -859,6 +910,8 @@ def probe_health(state: PartState) -> tuple[bool, dict | None]:
                 timeout=HEALTH_TIMEOUT_SECONDS,
                 cwd=str(state.spec.probe_cwd) if state.spec.probe_cwd is not None else None,
             )
+        except subprocess.TimeoutExpired:
+            return False, {"reason": "probe_command_timeout"}
         except Exception:  # noqa: BLE001 - bounded probe failure counts unhealthy
             return False, {"reason": "probe_command_failed"}
         if completed.returncode != 0:
@@ -869,6 +922,23 @@ def probe_health(state: PartState) -> tuple[bool, dict | None]:
             return False, {"reason": "probe_command_bad_json"}
         return bool(payload.get("ok")), payload
     return True, {"reason": "no_probe_required"}
+
+
+def _part_ready_for_dependency(state: PartState) -> tuple[bool, str]:
+    """Return whether one supervised part is ready enough for dependents."""
+    proc = state.proc
+    if proc is None or proc.poll() is not None:
+        return False, "not running"
+    if disable_reason(state.spec) is not None:
+        return False, "maintenance-disabled"
+    if state.spec.health_url or state.spec.probe_argv:
+        ok, payload = probe_health(state)
+        if ok:
+            return True, _probe_summary(payload)
+        return False, _probe_summary(payload)
+    if (time.monotonic() - state.started_at) < WORKER_SETTLE_SECONDS:
+        return False, f"starting (settle<{WORKER_SETTLE_SECONDS}s)"
+    return True, "running"
 
 
 def _probe_summary(payload: dict | None) -> str:
@@ -914,6 +984,132 @@ def stop_part(state: PartState, reason: str) -> None:
             pass
         state.log_handle = None
     state.proc = None
+
+
+def _close_handle(handle: object | None) -> None:
+    if handle is None:
+        return
+    try:
+        handle.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def launch_runtime_diagnostic(
+    state: DiagnosticState,
+    *,
+    reason: str,
+    respect_cooldown: bool = True,
+) -> bool:
+    """Spawn the bounded runtime sweep helper as a separate child process."""
+    if not DIAGNOSTIC_ENABLED:
+        return False
+    if not RUNTIME_OPS_SCRIPT.exists():
+        LOG.warning("runtime diagnostic launch skipped: missing %s", RUNTIME_OPS_SCRIPT)
+        return False
+    now = time.monotonic()
+    if state.proc is not None and state.proc.poll() is None:
+        return False
+    if (
+        respect_cooldown
+        and state.last_launch_at
+        and (now - state.last_launch_at) < DIAGNOSTIC_TRIGGER_COOLDOWN_SECONDS
+    ):
+        return False
+
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = LOG_DIR / "runtime_ops_supervisor.log"
+    log_file = open(log_path, "a", encoding="utf-8", buffering=1)
+    log_file.write(f"\n===== runtime_ops start {_utc_stamp()} reason={reason} =====\n")
+    log_file.flush()
+    argv = [
+        PYTHON,
+        str(RUNTIME_OPS_SCRIPT),
+        "--apply-safe-fixes",
+        "--timeout-seconds",
+        str(DIAGNOSTIC_TIMEOUT_SECONDS),
+        "--fix-wait-seconds",
+        str(DIAGNOSTIC_FIX_WAIT_SECONDS),
+    ]
+    try:
+        proc = subprocess.Popen(
+            argv,
+            cwd=str(MYMUSIC_ROOT),
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _close_handle(log_file)
+        LOG.warning("runtime diagnostic launch failed (%s): %r", reason, exc)
+        return False
+
+    state.proc = proc
+    state.log_handle = log_file
+    state.launched_at = now
+    state.last_launch_at = now
+    state.last_reason = reason
+    LOG.info("launched runtime diagnostic pid=%s reason=%s", proc.pid, reason)
+    return True
+
+
+def monitor_runtime_diagnostic(state: DiagnosticState) -> None:
+    """Reap or time-box the runtime diagnostic helper without blocking the loop."""
+    proc = state.proc
+    if proc is None:
+        return
+    if proc.poll() is None:
+        runtime_seconds = time.monotonic() - state.launched_at
+        if runtime_seconds < DIAGNOSTIC_MAX_RUNTIME_SECONDS:
+            return
+        LOG.warning(
+            "runtime diagnostic exceeded %ss; terminating pid=%s reason=%s",
+            DIAGNOSTIC_MAX_RUNTIME_SECONDS,
+            proc.pid,
+            state.last_reason,
+        )
+        try:
+            proc.terminate()
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("runtime diagnostic stop failed: %r", exc)
+
+    exit_code = proc.poll()
+    runtime_seconds = max(0.0, time.monotonic() - state.launched_at)
+    LOG.info(
+        "runtime diagnostic finished code=%s runtime=%.1fs reason=%s",
+        exit_code,
+        runtime_seconds,
+        state.last_reason,
+    )
+    _close_handle(state.log_handle)
+    state.proc = None
+    state.log_handle = None
+    state.launched_at = 0.0
+
+
+def stop_runtime_diagnostic(state: DiagnosticState, reason: str) -> None:
+    """Stop the diagnostic helper during supervisor shutdown/reload."""
+    proc = state.proc
+    if proc is None:
+        _close_handle(state.log_handle)
+        state.log_handle = None
+        return
+    if proc.poll() is None:
+        LOG.info("stopping runtime diagnostic pid=%s (%s)", proc.pid, reason)
+        try:
+            proc.terminate()
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("error stopping runtime diagnostic: %r", exc)
+    _close_handle(state.log_handle)
+    state.proc = None
+    state.log_handle = None
+    state.launched_at = 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -996,10 +1192,25 @@ def consume_supervisor_reload_reason() -> str | None:
     return text or "supervisor self-reload requested"
 
 
-def supervise(states: list[PartState]) -> None:
+def supervise(states: list[PartState], diagnostic_state: DiagnosticState) -> None:
     """Run the restart-and-heal loop until a shutdown signal arrives."""
     global _SHUTDOWN, _SELF_RELOAD
+    states_by_name = {state.spec.name: state for state in states}
     while not _SHUTDOWN:
+        monitor_runtime_diagnostic(diagnostic_state)
+        if (
+            DIAGNOSTIC_ENABLED
+            and DIAGNOSTIC_PERIODIC_SECONDS > 0
+            and (
+                diagnostic_state.last_launch_at == 0.0
+                or (time.monotonic() - diagnostic_state.last_launch_at) >= DIAGNOSTIC_PERIODIC_SECONDS
+            )
+        ):
+            launch_runtime_diagnostic(
+                diagnostic_state,
+                reason="periodic_supervisor_sweep",
+                respect_cooldown=False,
+            )
         supervisor_reload_reason = consume_supervisor_reload_reason()
         if supervisor_reload_reason is not None:
             LOG.info("supervisor self-reload requested -> %s", supervisor_reload_reason)
@@ -1045,6 +1256,10 @@ def supervise(states: list[PartState]) -> None:
                 if proc is not None:
                     code = proc.poll()
                     LOG.warning("%s exited code=%s", spec.name, code)
+                    launch_runtime_diagnostic(
+                        diagnostic_state,
+                        reason=f"part_exited:{spec.name}:code={code}",
+                    )
                     if state.log_handle is not None:
                         try:
                             state.log_handle.close()
@@ -1058,7 +1273,7 @@ def supervise(states: list[PartState]) -> None:
                     # Never restart a part into infrastructure that is not ready
                     # (e.g. Vault resealed, PostgreSQL restarting) -- that just
                     # recreates crash churn. Wait and re-check instead.
-                    ready, unmet = check_dependencies(spec)
+                    ready, unmet = check_all_dependencies(state, states_by_name)
                     if not ready:
                         summary = "; ".join(unmet)
                         if summary != state.dep_wait_note:
@@ -1075,6 +1290,19 @@ def supervise(states: list[PartState]) -> None:
             if state.consecutive_failures and (now - state.started_at) >= STABLE_AFTER_SECONDS:
                 LOG.info("%s stable; clearing failure count", spec.name)
                 state.consecutive_failures = 0
+
+            deps_ready, unmet = check_all_dependencies(state, states_by_name)
+            if not deps_ready:
+                summary = "; ".join(unmet)
+                if summary != state.dep_wait_note:
+                    LOG.warning("%s dependency lost while running -> %s", spec.name, summary)
+                    state.dep_wait_note = summary
+                stop_part(state, f"dependency unavailable: {summary}")
+                state.health_fail_count = 0
+                state.next_start_allowed_at = now + DEPENDENCY_POLL_SECONDS
+                continue
+            if state.dep_wait_note:
+                state.dep_wait_note = ""
 
             # Secondary wedged check via a bounded health probe. For APIs this is
             # /health; for crawler workers this is the durable worker_status
@@ -1096,6 +1324,10 @@ def supervise(states: list[PartState]) -> None:
                     )
                     if state.health_fail_count >= HEALTH_FAIL_LIMIT:
                         LOG.error("%s judged unhealthy/wedged; restarting", spec.name)
+                        launch_runtime_diagnostic(
+                            diagnostic_state,
+                            reason=f"health_probe_failed:{spec.name}",
+                        )
                         stop_part(state, "wedged: bounded health probe")
                         state.consecutive_failures += 1
                         state.next_start_allowed_at = now + _backoff(state)
@@ -1109,6 +1341,7 @@ def supervise(states: list[PartState]) -> None:
         LOG.info("shutdown requested; stopping fleet")
     for state in states:
         stop_part(state, "supervisor shutdown")
+    stop_runtime_diagnostic(diagnostic_state, "supervisor shutdown")
     if _SELF_RELOAD:
         LOG.info("supervisor exiting for self-reload")
     else:
@@ -1155,10 +1388,31 @@ def check_dependencies(spec: PartSpec) -> tuple[bool, list[str]]:
         if probe is None:
             LOG.warning("%s requires unknown dependency '%s' -- ignoring", spec.name, dep)
             continue
-        ready, detail = probe()
-        if not ready:
-            unmet.append(f"{dep}: {detail}")
+            ready, detail = probe()
+            if not ready:
+                unmet.append(f"{dep}: {detail}")
     return (not unmet), unmet
+
+
+def check_part_dependencies(state: PartState, states_by_name: dict[str, PartState]) -> tuple[bool, list[str]]:
+    """Check the supervised-part prerequisites for one part."""
+    unmet: list[str] = []
+    for dep_name in state.spec.requires_parts:
+        dep_state = states_by_name.get(dep_name)
+        if dep_state is None:
+            LOG.warning("%s requires unknown part dependency '%s' -- ignoring", state.spec.name, dep_name)
+            continue
+        ready, detail = _part_ready_for_dependency(dep_state)
+        if not ready:
+            unmet.append(f"{dep_name}: {detail}")
+    return (not unmet), unmet
+
+
+def check_all_dependencies(state: PartState, states_by_name: dict[str, PartState]) -> tuple[bool, list[str]]:
+    """Combine infra and runtime-part dependency checks for one part."""
+    ready, unmet = check_dependencies(state.spec)
+    parts_ready, part_unmet = check_part_dependencies(state, states_by_name)
+    return (ready and parts_ready), [*unmet, *part_unmet]
 
 
 _last_unseal_attempt = 0.0
@@ -1196,26 +1450,29 @@ def remediate_if_needed(unmet: list[str]) -> None:
             break
 
 
-def wait_for_dependencies(spec: PartSpec) -> None:
-    """Block until all of a part's required infra probes pass (or shutdown).
+def wait_for_dependencies(state: PartState, states_by_name: dict[str, PartState]) -> None:
+    """Block until all dependencies pass for one part (or shutdown).
 
     Patient by design: at machine boot Docker/PostgreSQL/Vault can take minutes.
     Starting a part before its dependencies are up is exactly the crash churn
-    this gating removes. Unmet reasons are logged only when they change, so a
-    long wait stays visible without spamming. If Vault is up but sealed, the
-    supervisor unseals it (via the helper) rather than waiting on a human.
+    this gating removes. This includes both base infrastructure readiness and
+    supervised upstream parts such as queue APIs/workers. Unmet reasons are
+    logged only when they change, so a long wait stays visible without spamming.
+    If Vault is up but sealed, the supervisor unseals it (via the helper)
+    rather than waiting on a human.
     """
-    if not spec.requires:
+    if not state.spec.requires and not state.spec.requires_parts:
         return
     note = ""
     while not _SHUTDOWN:
-        ready, unmet = check_dependencies(spec)
+        ready, unmet = check_all_dependencies(state, states_by_name)
         if ready:
-            LOG.info("%s dependencies ready (%s)", spec.name, ", ".join(spec.requires))
+            required = list(state.spec.requires) + list(state.spec.requires_parts)
+            LOG.info("%s dependencies ready (%s)", state.spec.name, ", ".join(required))
             return
         summary = "; ".join(unmet)
         if summary != note:
-            LOG.info("%s waiting on dependencies -> %s", spec.name, summary)
+            LOG.info("%s waiting on dependencies -> %s", state.spec.name, summary)
             note = summary
         remediate_if_needed(unmet)
         time.sleep(DEPENDENCY_POLL_SECONDS)
@@ -1233,6 +1490,7 @@ def startup_sequence(states: list[PartState]) -> None:
          also keeps a project's API and worker from refreshing the shared
          Vault-credential cache at the same instant (the concurrent-start race).
     """
+    states_by_name = {state.spec.name: state for state in states}
     for state in states:
         if _SHUTDOWN:
             return
@@ -1243,7 +1501,7 @@ def startup_sequence(states: list[PartState]) -> None:
                      state.spec.name, maintenance_reason)
             state.maintenance_note = maintenance_reason
             continue
-        wait_for_dependencies(state.spec)
+        wait_for_dependencies(state, states_by_name)
         if _SHUTDOWN:
             return
         start_part(state)
@@ -1263,9 +1521,16 @@ def main() -> None:
     sweep_orphans()
 
     states = [PartState(spec=spec) for spec in PARTS]
+    diagnostic_state = DiagnosticState()
     startup_sequence(states)
+    if not _SHUTDOWN:
+        launch_runtime_diagnostic(
+            diagnostic_state,
+            reason="startup_complete",
+            respect_cooldown=False,
+        )
 
-    supervise(states)
+    supervise(states, diagnostic_state)
 
 
 if __name__ == "__main__":
