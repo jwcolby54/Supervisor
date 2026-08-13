@@ -89,6 +89,9 @@ BACKOFF_CAP_SECONDS = 60
 # How many consecutive failed health probes before an API part is judged wedged
 # and force-restarted even though its process is technically still alive.
 HEALTH_FAIL_LIMIT = 3
+# Even restart-worthy health failures must persist for a while before the
+# supervisor recycles the process.
+HEALTH_RESTART_MIN_UNHEALTHY_SECONDS = 120
 DIAGNOSTIC_ENABLED = True
 DIAGNOSTIC_PERIODIC_SECONDS = 1800
 DIAGNOSTIC_TRIGGER_COOLDOWN_SECONDS = 300
@@ -653,9 +656,12 @@ class PartState:
     consecutive_failures: int = 0
     next_start_allowed_at: float = 0.0
     health_fail_count: int = 0
+    health_unhealthy_since: float = 0.0
     log_handle: object = field(default=None, repr=False)
     # Last "restart deferred, waiting on ..." reason logged, to avoid spamming.
     dep_wait_note: str = ""
+    # Last health note logged, to avoid probe-noise spam while observing.
+    health_note: str = ""
     # Last maintenance-disable note logged, to avoid loop spam while a part is
     # intentionally held down.
     maintenance_note: str = ""
@@ -718,6 +724,7 @@ def load_runtime_settings_from_sysvars() -> None:
     global BACKOFF_BASE_SECONDS
     global BACKOFF_CAP_SECONDS
     global HEALTH_FAIL_LIMIT
+    global HEALTH_RESTART_MIN_UNHEALTHY_SECONDS
     global DIAGNOSTIC_ENABLED
     global DIAGNOSTIC_PERIODIC_SECONDS
     global DIAGNOSTIC_TRIGGER_COOLDOWN_SECONDS
@@ -753,6 +760,9 @@ def load_runtime_settings_from_sysvars() -> None:
     BACKOFF_BASE_SECONDS = int(payload.get("backoff_base_seconds", BACKOFF_BASE_SECONDS))
     BACKOFF_CAP_SECONDS = int(payload.get("backoff_cap_seconds", BACKOFF_CAP_SECONDS))
     HEALTH_FAIL_LIMIT = int(payload.get("health_fail_limit", HEALTH_FAIL_LIMIT))
+    HEALTH_RESTART_MIN_UNHEALTHY_SECONDS = int(
+        payload.get("health_restart_min_unhealthy_seconds", HEALTH_RESTART_MIN_UNHEALTHY_SECONDS)
+    )
     DIAGNOSTIC_ENABLED = bool(int(payload.get("diagnostic_enabled", int(DIAGNOSTIC_ENABLED))))
     DIAGNOSTIC_PERIODIC_SECONDS = int(payload.get("diagnostic_periodic_seconds", DIAGNOSTIC_PERIODIC_SECONDS))
     DIAGNOSTIC_TRIGGER_COOLDOWN_SECONDS = int(
@@ -878,7 +888,7 @@ def start_part(state: PartState) -> None:
 
     state.proc = proc
     state.started_at = time.monotonic()
-    state.health_fail_count = 0
+    _clear_health_observation(state)
     state.log_handle = log_file
     LOG.info("started %s pid=%s -> %s", spec.name, proc.pid, log_path.name)
 
@@ -933,7 +943,7 @@ def _part_ready_for_dependency(state: PartState) -> tuple[bool, str]:
         return False, "maintenance-disabled"
     if state.spec.health_url or state.spec.probe_argv:
         ok, payload = probe_health(state)
-        if ok:
+        if ok or _probe_dependency_ready(payload):
             return True, _probe_summary(payload)
         return False, _probe_summary(payload)
     if (time.monotonic() - state.started_at) < WORKER_SETTLE_SECONDS:
@@ -964,6 +974,24 @@ def _probe_summary(payload: dict | None) -> str:
     return ", ".join(fields) if fields else "no detail"
 
 
+def _probe_dependency_ready(payload: dict | None) -> bool:
+    if not payload:
+        return False
+    return bool(payload.get("dependency_ready", payload.get("ok", False)))
+
+
+def _probe_restart_recommended(payload: dict | None) -> bool:
+    if not payload:
+        return True
+    return bool(payload.get("restart_recommended", not payload.get("ok", True)))
+
+
+def _clear_health_observation(state: PartState) -> None:
+    state.health_fail_count = 0
+    state.health_unhealthy_since = 0.0
+    state.health_note = ""
+
+
 def stop_part(state: PartState, reason: str) -> None:
     """Terminate a part's process and close its log handle."""
     proc = state.proc
@@ -984,6 +1012,7 @@ def stop_part(state: PartState, reason: str) -> None:
             pass
         state.log_handle = None
     state.proc = None
+    _clear_health_observation(state)
 
 
 def _close_handle(handle: object | None) -> None:
@@ -1229,7 +1258,7 @@ def supervise(states: list[PartState], diagnostic_state: DiagnosticState) -> Non
                 if proc is not None and proc.poll() is None:
                     stop_part(state, f"reload requested: {reload_reason}")
                 state.dep_wait_note = ""
-                state.health_fail_count = 0
+                _clear_health_observation(state)
                 state.next_start_allowed_at = 0.0
                 state.consecutive_failures = 0
                 continue
@@ -1244,7 +1273,7 @@ def supervise(states: list[PartState], diagnostic_state: DiagnosticState) -> Non
                 if proc is not None and proc.poll() is None:
                     stop_part(state, f"maintenance-disabled: {maintenance_reason}")
                 state.dep_wait_note = ""
-                state.health_fail_count = 0
+                _clear_health_observation(state)
                 state.next_start_allowed_at = 0.0
                 continue
             if state.maintenance_note:
@@ -1298,7 +1327,7 @@ def supervise(states: list[PartState], diagnostic_state: DiagnosticState) -> Non
                     LOG.warning("%s dependency lost while running -> %s", spec.name, summary)
                     state.dep_wait_note = summary
                 stop_part(state, f"dependency unavailable: {summary}")
-                state.health_fail_count = 0
+                _clear_health_observation(state)
                 state.next_start_allowed_at = now + DEPENDENCY_POLL_SECONDS
                 continue
             if state.dep_wait_note:
@@ -1312,17 +1341,34 @@ def supervise(states: list[PartState], diagnostic_state: DiagnosticState) -> Non
             ) >= HEALTH_TIMEOUT_SECONDS:
                 ok, payload = probe_health(state)
                 if ok:
-                    state.health_fail_count = 0
+                    _clear_health_observation(state)
                 else:
+                    summary = _probe_summary(payload)
+                    if not _probe_restart_recommended(payload):
+                        if summary != state.health_note:
+                            LOG.info("%s health probe observe-only -> %s", spec.name, summary)
+                            state.health_note = summary
+                        state.health_fail_count = 0
+                        state.health_unhealthy_since = 0.0
+                        continue
+                    if state.health_unhealthy_since == 0.0:
+                        state.health_unhealthy_since = now
                     state.health_fail_count += 1
+                    unhealthy_seconds = now - state.health_unhealthy_since
                     LOG.warning(
-                        "%s health probe failed (%s/%s) -> %s",
+                        "%s health probe failed (%s/%s, %.0fs/%.0fs) -> %s",
                         spec.name,
                         state.health_fail_count,
                         HEALTH_FAIL_LIMIT,
-                        _probe_summary(payload),
+                        unhealthy_seconds,
+                        HEALTH_RESTART_MIN_UNHEALTHY_SECONDS,
+                        summary,
                     )
-                    if state.health_fail_count >= HEALTH_FAIL_LIMIT:
+                    state.health_note = summary
+                    if (
+                        state.health_fail_count >= HEALTH_FAIL_LIMIT
+                        and unhealthy_seconds >= HEALTH_RESTART_MIN_UNHEALTHY_SECONDS
+                    ):
                         LOG.error("%s judged unhealthy/wedged; restarting", spec.name)
                         launch_runtime_diagnostic(
                             diagnostic_state,
