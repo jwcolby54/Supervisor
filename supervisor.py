@@ -57,6 +57,7 @@ DISABLED_DIR = CONTROL_DIR / "disabled"
 RELOAD_DIR = CONTROL_DIR / "reload"
 DATASOURCE_ROOT = SUPERVISOR_DIR.parent  # E:\DevPython\DataSourceQueue
 SUPERVISOR_SYSVAR_READER = SUPERVISOR_DIR / "read_supervisor_sysvars.py"
+POWER_EVENT_BRIDGE = SUPERVISOR_DIR / "power_event_bridge.py"
 
 PYTHON = sys.executable  # same interpreter the supervisor runs under
 
@@ -98,6 +99,11 @@ DIAGNOSTIC_TRIGGER_COOLDOWN_SECONDS = 300
 DIAGNOSTIC_MAX_RUNTIME_SECONDS = 900
 DIAGNOSTIC_TIMEOUT_SECONDS = 30
 DIAGNOSTIC_FIX_WAIT_SECONDS = 10
+# Host sleep/resume handling. If the supervisor loop disappears far longer than
+# expected, treat that as the machine having slept or resumed and temporarily
+# suppress restart/health decisions while the fleet wakes back up.
+RESUME_GAP_DETECTED_SECONDS = 30
+RESUME_GRACE_SECONDS = 180
 
 
 # --------------------------------------------------------------------------- #
@@ -678,6 +684,17 @@ class DiagnosticState:
     last_reason: str = ""
 
 
+@dataclass
+class CompanionProcessState:
+    """Live handle for a helper process owned by the supervisor itself."""
+
+    name: str
+    argv: list[str]
+    cwd: Path
+    proc: Optional[subprocess.Popen] = None
+    log_handle: object = field(default=None, repr=False)
+
+
 # --------------------------------------------------------------------------- #
 # Logging
 # --------------------------------------------------------------------------- #
@@ -731,6 +748,8 @@ def load_runtime_settings_from_sysvars() -> None:
     global DIAGNOSTIC_MAX_RUNTIME_SECONDS
     global DIAGNOSTIC_TIMEOUT_SECONDS
     global DIAGNOSTIC_FIX_WAIT_SECONDS
+    global RESUME_GAP_DETECTED_SECONDS
+    global RESUME_GRACE_SECONDS
 
     try:
         completed = subprocess.run(
@@ -773,6 +792,8 @@ def load_runtime_settings_from_sysvars() -> None:
     )
     DIAGNOSTIC_TIMEOUT_SECONDS = int(payload.get("diagnostic_timeout_seconds", DIAGNOSTIC_TIMEOUT_SECONDS))
     DIAGNOSTIC_FIX_WAIT_SECONDS = int(payload.get("diagnostic_fix_wait_seconds", DIAGNOSTIC_FIX_WAIT_SECONDS))
+    RESUME_GAP_DETECTED_SECONDS = int(payload.get("resume_gap_detected_seconds", RESUME_GAP_DETECTED_SECONDS))
+    RESUME_GRACE_SECONDS = int(payload.get("resume_grace_seconds", RESUME_GRACE_SECONDS))
     LOG.info("loaded supervisor runtime config from crawler.sysvar")
 
 
@@ -992,6 +1013,49 @@ def _clear_health_observation(state: PartState) -> None:
     state.health_note = ""
 
 
+def _resume_gap_threshold_seconds() -> float:
+    """Return the loop-gap threshold that counts as host sleep/resume."""
+    return max(float(RESUME_GAP_DETECTED_SECONDS), float(LOOP_INTERVAL_SECONDS * 4))
+
+
+def _apply_resume_grace(states: list[PartState], gap_seconds: float, now: float) -> float:
+    """Enter resume grace after a suspiciously long supervisor loop gap."""
+    grace_until = now + RESUME_GRACE_SECONDS
+    LOG.warning(
+        "host sleep/resume suspected; supervisor loop gap %.1fs exceeded %.1fs. "
+        "Suppressing restart/health actions for %ss while the laptop wakes.",
+        gap_seconds,
+        _resume_gap_threshold_seconds(),
+        RESUME_GRACE_SECONDS,
+    )
+    for state in states:
+        _clear_health_observation(state)
+        state.dep_wait_note = ""
+        state.health_note = ""
+        state.next_start_allowed_at = max(state.next_start_allowed_at, grace_until)
+    return grace_until
+
+
+def _reap_exited_during_resume_grace(state: PartState) -> None:
+    """Release bookkeeping for a dead child without restarting during grace."""
+    proc = state.proc
+    if proc is None or proc.poll() is None:
+        return
+    LOG.warning(
+        "%s exited code=%s during host resume grace; holding restart until grace ends",
+        state.spec.name,
+        proc.poll(),
+    )
+    if state.log_handle is not None:
+        try:
+            state.log_handle.close()
+        except Exception:  # noqa: BLE001
+            pass
+        state.log_handle = None
+    state.proc = None
+    _clear_health_observation(state)
+
+
 def stop_part(state: PartState, reason: str) -> None:
     """Terminate a part's process and close its log handle."""
     proc = state.proc
@@ -1080,6 +1144,64 @@ def launch_runtime_diagnostic(
     state.last_reason = reason
     LOG.info("launched runtime diagnostic pid=%s reason=%s", proc.pid, reason)
     return True
+
+
+def _start_companion_process(state: CompanionProcessState) -> None:
+    """Start one supervisor-owned helper that is not part of the managed fleet."""
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = LOG_DIR / f"{state.name}.log"
+    log_file = open(log_path, "a", encoding="utf-8", buffering=1)
+    log_file.write(f"\n===== {state.name} start {_utc_stamp()} =====\n")
+    log_file.flush()
+    try:
+        proc = subprocess.Popen(
+            state.argv,
+            cwd=str(state.cwd),
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _close_handle(log_file)
+        LOG.warning("failed to start companion %s: %r", state.name, exc)
+        return
+    state.proc = proc
+    state.log_handle = log_file
+    LOG.info("started companion %s pid=%s -> %s", state.name, proc.pid, log_path.name)
+
+
+def monitor_companion_process(state: CompanionProcessState) -> None:
+    """Keep a supervisor-owned helper running without treating it as fleet work."""
+    proc = state.proc
+    if proc is None:
+        _start_companion_process(state)
+        return
+    exit_code = proc.poll()
+    if exit_code is None:
+        return
+    LOG.warning("companion %s exited code=%s; restarting", state.name, exit_code)
+    _close_handle(state.log_handle)
+    state.proc = None
+    state.log_handle = None
+    _start_companion_process(state)
+
+
+def stop_companion_process(state: CompanionProcessState, reason: str) -> None:
+    """Stop a supervisor-owned helper during shutdown/reload."""
+    proc = state.proc
+    if proc is not None and proc.poll() is None:
+        LOG.info("stopping companion %s pid=%s (%s)", state.name, proc.pid, reason)
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("error stopping companion %s: %r", state.name, exc)
+    _close_handle(state.log_handle)
+    state.proc = None
+    state.log_handle = None
 
 
 def monitor_runtime_diagnostic(state: DiagnosticState) -> None:
@@ -1221,18 +1343,31 @@ def consume_supervisor_reload_reason() -> str | None:
     return text or "supervisor self-reload requested"
 
 
-def supervise(states: list[PartState], diagnostic_state: DiagnosticState) -> None:
+def supervise(
+    states: list[PartState],
+    diagnostic_state: DiagnosticState,
+    power_bridge_state: CompanionProcessState,
+) -> None:
     """Run the restart-and-heal loop until a shutdown signal arrives."""
     global _SHUTDOWN, _SELF_RELOAD
     states_by_name = {state.spec.name: state for state in states}
+    last_loop_at = time.monotonic()
+    resume_grace_until = 0.0
     while not _SHUTDOWN:
+        now = time.monotonic()
+        loop_gap_seconds = now - last_loop_at
+        last_loop_at = now
+        if loop_gap_seconds >= _resume_gap_threshold_seconds():
+            resume_grace_until = _apply_resume_grace(states, loop_gap_seconds, now)
+
+        monitor_companion_process(power_bridge_state)
         monitor_runtime_diagnostic(diagnostic_state)
         if (
             DIAGNOSTIC_ENABLED
             and DIAGNOSTIC_PERIODIC_SECONDS > 0
             and (
                 diagnostic_state.last_launch_at == 0.0
-                or (time.monotonic() - diagnostic_state.last_launch_at) >= DIAGNOSTIC_PERIODIC_SECONDS
+                or (now - diagnostic_state.last_launch_at) >= DIAGNOSTIC_PERIODIC_SECONDS
             )
         ):
             launch_runtime_diagnostic(
@@ -1246,7 +1381,6 @@ def supervise(states: list[PartState], diagnostic_state: DiagnosticState) -> Non
             _SELF_RELOAD = True
             _SHUTDOWN = True
             break
-        now = time.monotonic()
         for state in states:
             spec = state.spec
             proc = state.proc
@@ -1279,6 +1413,11 @@ def supervise(states: list[PartState], diagnostic_state: DiagnosticState) -> Non
             if state.maintenance_note:
                 LOG.info("%s maintenance re-enabled", spec.name)
                 state.maintenance_note = ""
+
+            if now < resume_grace_until:
+                if proc is None or proc.poll() is not None:
+                    _reap_exited_during_resume_grace(state)
+                continue
 
             # Not running -> (re)start when backoff allows.
             if proc is None or proc.poll() is not None:
@@ -1388,6 +1527,7 @@ def supervise(states: list[PartState], diagnostic_state: DiagnosticState) -> Non
     for state in states:
         stop_part(state, "supervisor shutdown")
     stop_runtime_diagnostic(diagnostic_state, "supervisor shutdown")
+    stop_companion_process(power_bridge_state, "supervisor shutdown")
     if _SELF_RELOAD:
         LOG.info("supervisor exiting for self-reload")
     else:
@@ -1568,6 +1708,12 @@ def main() -> None:
 
     states = [PartState(spec=spec) for spec in PARTS]
     diagnostic_state = DiagnosticState()
+    power_bridge_state = CompanionProcessState(
+        name="power_event_bridge",
+        argv=[PYTHON, str(POWER_EVENT_BRIDGE)],
+        cwd=SUPERVISOR_DIR,
+    )
+    monitor_companion_process(power_bridge_state)
     startup_sequence(states)
     if not _SHUTDOWN:
         launch_runtime_diagnostic(
@@ -1576,7 +1722,7 @@ def main() -> None:
             respect_cooldown=False,
         )
 
-    supervise(states, diagnostic_state)
+    supervise(states, diagnostic_state, power_bridge_state)
 
 
 if __name__ == "__main__":
