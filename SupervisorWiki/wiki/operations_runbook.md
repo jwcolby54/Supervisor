@@ -53,6 +53,16 @@ Per-part logs:
 - `logs\graph_explorer_pg.log`
 - `logs\cloudflared_tunnel.log`
 
+Diagnostic helper log:
+
+- `logs\runtime_ops_supervisor.log`
+
+That log is written by the Supervisor-launched deep runtime sweep helper
+(`E:\DevPython\MyMusicCollection\ActiveCode\tools\runtime_ops.py`). The helper
+also writes its own JSON/text artifacts under:
+
+- `E:\DevPython\MyMusicCollection\output\runtime_ops_reports\`
+
 ## Maintenance And Reload Control
 
 Control helper:

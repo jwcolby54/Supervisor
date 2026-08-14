@@ -61,12 +61,16 @@ It owns:
 - maintenance-disable handling
 - child reload handling
 - supervisor self-reload handling
+- bounded launch/monitor of the deeper MyMusic runtime diagnostic helper
+  (`E:\DevPython\MyMusicCollection\ActiveCode\tools\runtime_ops.py`)
 - graceful shutdown of the fleet
 
 Important design boundary:
 
 - it never imports queue worker code into its own interpreter
 - it only launches child OS processes
+- deeper diagnostics remain a separate child process with cooldowns and a max
+ runtime; the main loop stays lightweight and DB-free
 
 ## `set_maintenance.py`
 

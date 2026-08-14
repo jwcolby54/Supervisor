@@ -14,6 +14,8 @@ It owns:
 - process supervision for the two local FastAPI apps
 - process supervision for the Cloudflare tunnel
 - dependency-gated startup
+- dependency-gated runtime hold-down of downstream parts when an upstream
+  service is unavailable
 - bounded runtime health checks
 - Vault auto-unseal
 - maintenance-disable and reload control flags
@@ -68,6 +70,25 @@ bounded helper scripts:
 
 The service identity is `LocalSystem`. Secrets are intended to live in
 LocalSystem's keyring, not in the service registry config, after activation.
+
+## Runtime Dependency Rule
+
+Dependency gating is not just a boot-time convenience.
+
+If an upstream runtime dependency drops, the supervisor brings dependent parts
+down and holds them down until the upstream dependency is healthy again.
+
+Current important edges:
+
+- `mbqueue_api` depends on `mbqueue_worker`
+- `fmqueue_api` depends on `fmqueue_worker`
+- MusicBrainz crawler lanes depend on `mbqueue_api`
+- Last.fm crawler lanes depend on `fmqueue_api`
+- `cloudflared_tunnel` depends on both local web apps
+
+This prevents a post-reboot or mid-run failure from turning into repeated local
+connection-refused churn where a crawler worker keeps trying to use a queue API
+that is not actually available yet.
 
 ## Current Parts Owned
 

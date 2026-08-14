@@ -3,7 +3,7 @@
 
 ## Build State
 
-As of 2026-08-06, the Supervisor project contains:
+As of 2026-08-12, the Supervisor project contains:
 
 - a working supervisor loop in `supervisor.py`
 - local control-plane tooling in `set_maintenance.py`
@@ -12,6 +12,8 @@ As of 2026-08-06, the Supervisor project contains:
 - a post-boot verifier in `verify_boot.py`
 - a separate Vault unseal helper in `unseal_vault.py`
 - install/activation/bootstrap helpers for the Windows service model
+- automatic launch/monitor of the deeper MyMusic runtime sweep helper
+  `E:\DevPython\MyMusicCollection\ActiveCode\tools\runtime_ops.py`
 
 ## Current Runtime Shape
 
@@ -56,3 +58,5 @@ These are deliberate design choices, not missing work:
 - local file-based maintenance/reload flags instead of DB-owned control flags
 - separate `unseal_vault.py` helper instead of storing the unseal key in the
  long-lived supervisor process
+- deeper runtime diagnosis running as a separate bounded child process rather
+ than being folded into the supervisor loop itself
