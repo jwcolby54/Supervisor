@@ -24,13 +24,17 @@ git status --short
 git remote -v
 python -m ruff check .
 python -m pytest
-python -m py_compile supervisor.py set_maintenance.py verify_boot.py unseal_vault.py probe_worker_status.py read_supervisor_sysvars.py
+python -m py_compile supervisor.py supervisor_shared_logging.py set_maintenance.py verify_boot.py unseal_vault.py probe_worker_status.py read_supervisor_sysvars.py publish_supervisor_status.py
 ```
 
-Current test nuance:
+Current test state:
 
-- `python -m pytest` may currently collect `0` items
-- that still must be recorded during maintenance instead of silently skipped
+- `python -m pytest` collects a real suite -- **27 passed** on 2026-08-21
+  (`test_probe_batching.py`, `test_restart.py`, `test_supervisor_status.py`).
+- The older "may collect 0 items" note was stale and has been corrected.
+- `test_supervisor_status.py` replaces `supervisor.LOG` with a test logger, so
+  its simulated publisher failures do not land in the live `supervisor.log`
+  looking like a real incident. Keep that fixture if you add tests here.
 
 ## Wiki Refresh Targets
 
@@ -46,6 +50,7 @@ Current test nuance:
 - `set_maintenance.py`
 - `probe_worker_status.py`
 - `read_supervisor_sysvars.py`
+- `publish_supervisor_status.py`
 - `verify_boot.py`
 - `unseal_vault.py`
 

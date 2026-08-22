@@ -16,9 +16,14 @@ import json
 import urllib.error
 import urllib.request
 
+from supervisor_shared_logging import build_runtime_logger
+
 VAULT_ADDR = "http://127.0.0.1:18200"
 OPERATOR_SERVICE = "shared-vault-operator-secrets"
 UNSEAL_KEY_ID = "SA_SECRET_VAULT_UNSEAL_KEY"
+
+APP_LOGGER = build_runtime_logger(source="supervisor/unseal_vault.py")
+APP_LOGGER.install_unhandled_exception_hook()
 
 
 def _seal_status() -> dict:
@@ -41,6 +46,7 @@ def main() -> int:
     try:
         status = _seal_status()
     except Exception as exc:  # noqa: BLE001
+        APP_LOGGER.log_handled_exception(exc, event_type="vault_seal_status_failed")
         print(f"vault unreachable: {exc!r}")
         return 2
     if not status.get("sealed"):
@@ -57,6 +63,7 @@ def main() -> int:
     try:
         result = _submit_unseal(key)
     except Exception as exc:  # noqa: BLE001
+        APP_LOGGER.log_handled_exception(exc, event_type="vault_unseal_request_failed")
         print(f"unseal request failed: {exc!r}")
         return 4
 
@@ -69,4 +76,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except BaseException as exc:
+        if not isinstance(exc, SystemExit):
+            APP_LOGGER.log_handled_exception(exc, event_type="vault_unseal_helper_failed")
+        raise

@@ -16,6 +16,7 @@ import argparse
 from pathlib import Path
 
 from supervisor import DISABLED_DIR, PARTS, RELOAD_DIR, SUPERVISOR_RELOAD_FLAG
+from supervisor_shared_logging import build_runtime_logger
 
 
 ALL_FLAG = DISABLED_DIR / "_all.disabled"
@@ -32,7 +33,13 @@ HYDRATOR_PARTS = [
     "album_hydrator_submit",
     "album_hydrator_collect",
     "album_hydrator_hydrate",
+    "song_hydrator_identity_submit",
+    "song_hydrator_identity_collect",
 ]
+
+
+APP_LOGGER = build_runtime_logger(source="supervisor/set_maintenance.py")
+APP_LOGGER.install_unhandled_exception_hook()
 
 
 def _part_flag(name: str) -> Path:
@@ -182,4 +189,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except BaseException as exc:
+        if not isinstance(exc, SystemExit):
+            APP_LOGGER.log_handled_exception(exc, event_type="set_maintenance_failed")
+        raise

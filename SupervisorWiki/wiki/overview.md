@@ -11,6 +11,7 @@ It owns:
 - process supervision for queue workers and APIs
 - process supervision for the always-on MyMusic hydrator workers
 - process supervision for the artist Last.fm submit/collect workers
+- process supervision for the song identity worker
 - process supervision for the two local FastAPI apps
 - process supervision for the Cloudflare tunnel
 - dependency-gated startup
@@ -19,6 +20,8 @@ It owns:
 - bounded runtime health checks
 - Vault auto-unseal
 - maintenance-disable and reload control flags
+- shared app-event/error logging into `crawler.app_event_log` while still
+  keeping local rotating/per-part logs for operators
 
 It does not own:
 
@@ -42,6 +45,8 @@ The fleet now includes:
 - song Last.fm submit/collect workers
 - artist hydrator submit/collect workers
 - artist Last.fm submit/collect workers
+- album hydrator submit/collect/hydrate workers
+- song identity worker
 - `music_explorer_pg`
 - `graph_explorer_pg`
 - `cloudflared_tunnel`
@@ -67,9 +72,20 @@ bounded helper scripts:
 5. Bootstrap/activation helpers provision the LocalSystem keyring and switch
  the service from the initial install state to the current keyring-backed
  state.
+6. `supervisor_shared_logging.py` bridges Supervisor-side scripts into the
+ shared `crawler.app_event_log` contract with emergency-file fallback.
+7. `power_event_bridge.py` listens for Windows suspend/resume and drives the
+ local maintenance flags so the fleet winds down before sleep and comes back in
+ dependency order after resume.
 
 The service identity is `LocalSystem`. Secrets are intended to live in
 LocalSystem's keyring, not in the service registry config, after activation.
+
+The Supervisor also owns two different helper classes of child process:
+
+- bounded probes/diagnostics (`probe_worker_status.py`, queue runtime probes,
+  `runtime_ops.py`)
+- non-fleet companion processes such as `power_event_bridge.py`
 
 ## Runtime Dependency Rule
 
@@ -111,6 +127,8 @@ Owned parts include:
 - `album_hydrator_submit`
 - `album_hydrator_collect`
 - `album_hydrator_hydrate`
+- `song_hydrator_identity_submit`
+- `song_hydrator_identity_collect`
 - `music_explorer_pg`
 - `graph_explorer_pg`
 - `cloudflared_tunnel`
@@ -131,6 +149,7 @@ submit/collect pair even though they are supervised parts here.
 - `E:\DevPython\DataSourceQueue\Supervisor\read_supervisor_sysvars.py`
 - `E:\DevPython\DataSourceQueue\Supervisor\verify_boot.py`
 - `E:\DevPython\DataSourceQueue\Supervisor\unseal_vault.py`
+- `E:\DevPython\DataSourceQueue\Supervisor\supervisor_shared_logging.py`
 - `E:\DevPython\DataSourceQueue\Supervisor\install_service.py`
 - `E:\DevPython\DataSourceQueue\Supervisor\elevated_activate.ps1`
 - `E:\DevPython\DataSourceQueue\Supervisor\export_secrets.py`
@@ -138,6 +157,9 @@ submit/collect pair even though they are supervised parts here.
 - `E:\DevPython\DataSourceQueue\Supervisor\system_keyring_selftest.py`
 
 ## Important Current Nuance
+
+Do not use designflow/workflow documents as guidance for this repo. The
+Supervisor wiki is the source of truth; code dive only to repair the wiki.
 
 The repository still contains the initial installer flow in
 `install_service.py`, which writes a bootstrap `VAULT_TOKEN` into the service

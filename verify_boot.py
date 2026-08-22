@@ -10,9 +10,20 @@ Reports, top to bottom:
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import urllib.request
+from pathlib import Path
+
+from supervisor_shared_logging import build_runtime_logger
+
+
+SUPERVISOR_DIR = Path(__file__).resolve().parent
+MBQUEUE_DIR = SUPERVISOR_DIR.parent / "MBQueue"
+FMQUEUE_DIR = SUPERVISOR_DIR.parent / "FMQueue"
+PYTHON = "python"
+
+APP_LOGGER = build_runtime_logger(source="supervisor/verify_boot.py")
+APP_LOGGER.install_unhandled_exception_hook()
 
 
 def http_json(url: str, timeout: float = 3.0):
@@ -21,6 +32,33 @@ def http_json(url: str, timeout: float = 3.0):
             return r.status, json.loads(r.read().decode("utf-8", "replace"))
     except Exception as exc:  # noqa: BLE001
         return None, str(exc)
+
+
+def runtime_probe(queue_dir: Path, module: str, component: str) -> dict[str, object]:
+    completed = subprocess.run(
+        [
+            PYTHON,
+            "-m",
+            module,
+            "--component",
+            component,
+            "--heartbeat-max-seconds",
+            "180",
+            "--progress-max-seconds",
+            "1800",
+        ],
+        cwd=str(queue_dir),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip()
+        raise RuntimeError(f"{module} rc={completed.returncode}: {detail}")
+    try:
+        return json.loads((completed.stdout or "").strip())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{module} produced invalid JSON") from exc
 
 
 def main() -> None:
@@ -47,29 +85,29 @@ def main() -> None:
         ok = isinstance(body, dict) and body.get("status") == "ok"
         print(f"[api     ] {name}: {'OK' if ok else 'DOWN'} ({body if not ok else body.get('run_id')})")
 
-    # 4. Worker drain locks
+    # 4. Queue worker runtime probes
     try:
-        env = {}
-        for line in open(r"E:\SharedInfra\shared-stack\.env", encoding="utf-8"):
-            m = re.match(r"^([A-Z_]+)=(.*)$", line.strip())
-            if m:
-                env[m.group(1)] = m.group(2)
-        import psycopg2
-        c = psycopg2.connect(host="localhost", port=5434, dbname="postgres",
-                             user=env["POSTGRES_USER"], password=env["POSTGRES_PASSWORD"])
-        cur = c.cursor()
-        cur.execute("select objid,pid from pg_locks where locktype='advisory' and objid in (90421001,90421002) order by objid")
-        held = {o: p for o, p in cur.fetchall()}
-        cur.close()
-        c.close()
-        print(f"[workers ] MB drain lock: {'HELD pid='+str(held[90421001]) if 90421001 in held else 'NOT held'}")
-        print(f"[workers ] FM drain lock: {'HELD pid='+str(held[90421002]) if 90421002 in held else 'NOT held'}")
+        mb_worker = runtime_probe(MBQUEUE_DIR, "mbqueue.runtime_probe", "Worker")
+        fm_worker = runtime_probe(FMQUEUE_DIR, "fmqueue.runtime_probe", "Worker")
+        print(
+            f"[workers ] MBQueue worker: {'OK' if mb_worker.get('ok') else 'DOWN'} "
+            f"({mb_worker.get('reason')}, status={mb_worker.get('status')})"
+        )
+        print(
+            f"[workers ] FMQueue worker: {'OK' if fm_worker.get('ok') else 'DOWN'} "
+            f"({fm_worker.get('reason')}, status={fm_worker.get('status')})"
+        )
     except Exception as exc:  # noqa: BLE001
-        print(f"[workers ] could not check locks ({exc})")
+        APP_LOGGER.log_handled_exception(exc, event_type="verify_boot_worker_probe_failed")
+        print(f"[workers ] could not check queue worker runtime probes ({exc})")
 
-    print("\nReading: service Running + both APIs OK + both locks HELD == full chain up.")
+    print("\nReading: service Running + both APIs OK + both queue workers OK == full chain up.")
     print("If service Running but APIs DOWN, infra (Docker/Vault) is not ready yet or Vault is sealed.")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:  # noqa: BLE001
+        APP_LOGGER.log_handled_exception(exc, event_type="verify_boot_failed")
+        raise

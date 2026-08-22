@@ -3,14 +3,20 @@
 
 ## Build State
 
-As of 2026-08-12, the Supervisor project contains:
+As of 2026-08-20, the Supervisor project contains:
 
 - a working supervisor loop in `supervisor.py`
 - local control-plane tooling in `set_maintenance.py`
 - bounded MyMusic worker probes in `probe_worker_status.py`
 - bounded sysvar tuning reads in `read_supervisor_sysvars.py`
+- the Supervisor's own outward health signal in
+  `publish_supervisor_status.py` (added 2026-08-21) -- `SUP_Sta_*` heartbeat and
+  status published once a minute from the loop, plus a terminal row on shutdown.
+  Before it, the process watching the fleet was itself observable only by
+  tailing a log file.
 - a post-boot verifier in `verify_boot.py`
 - a separate Vault unseal helper in `unseal_vault.py`
+- a shared app-log bridge in `supervisor_shared_logging.py`
 - install/activation/bootstrap helpers for the Windows service model
 - automatic launch/monitor of the deeper MyMusic runtime sweep helper
   `E:\DevPython\MyMusicCollection\ActiveCode\tools\runtime_ops.py`
@@ -18,7 +24,7 @@ As of 2026-08-12, the Supervisor project contains:
 ## Current Runtime Shape
 
 The supervised fleet is the `PARTS` registry in `supervisor.py`. As of
-2026-08-06 it holds 18 parts:
+2026-08-20 it holds 19 parts:
 
 - MBQueue worker + API
 - FMQueue worker + API
@@ -28,6 +34,7 @@ The supervised fleet is the `PARTS` registry in `supervisor.py`. As of
 - artist Last.fm submit/collect
 - album hydrator submit/collect/hydrate (three-stage MB-only album tracklist
  lane, added 2026-08-06)
+- song hydrator identity
 - `music_explorer_pg`
 - `graph_explorer_pg`
 - `cloudflared_tunnel`
@@ -47,6 +54,22 @@ There are two different truths in the repo if you only read one file:
  removes that token, leaving only `VAULT_ADDR`
 
 So documentation should describe the staged flow, not either file in isolation.
+
+Runtime logging now has two intentional layers:
+
+- local rotating/per-part files for the Windows-service operator path
+- shared `crawler.app_event_log` writes for Supervisor/runtime errors, with the
+  shared emergency-file fallback if the DB is unavailable
+
+Health probing (as of 2026-08-20) is BATCHED and CACHED per loop. `supervise()`
+builds one `gather_probe_results()` cache each loop: all crawler-worker status
+reads collapse into a single `probe_worker_status.py --specs-json` subprocess (one
+DB connection for the whole fleet), and each other part is probed at most once and
+reused for every dependent's dependency-check. This replaced the old ~30
+subprocess+connection probes per loop (a shared upstream was re-probed once per
+dependent) with ~5 subprocesses + one DB connection. A part with no probe result a
+given loop is HELD, not restarted, so a transient probe blip cannot flap the fleet.
+Covered by `test_probe_batching.py`. Cut over live via `reload-supervisor`.
 
 ## Non-Gaps To Keep Straight
 

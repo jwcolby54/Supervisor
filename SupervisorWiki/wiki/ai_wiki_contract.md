@@ -10,6 +10,8 @@ For this project, that means:
 - the wiki teaches and routes first
 - the code verifies and implements
 - if code and wiki disagree, the wiki must be repaired
+- `DesignFlow` / `workFlow` documents are not guidance for this repo; this wiki
+  is the source of truth and any required code-dive findings belong back here
 
 The AI should be able to identify the owning Supervisor script before doing
 repo-wide grep.
