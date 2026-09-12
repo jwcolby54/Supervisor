@@ -1,0 +1,53 @@
+# fleet-requirements.txt -- the always-on fleet's Python dependencies.
+# Source of truth for the dedicated fleet virtual environment.
+#
+# WHY THIS EXISTS
+# The fleet used to run on a shared, per-user Python install whose packages were
+# split between the interpreter's Lib\site-packages (visible to the Windows
+# service account) and the roaming user-site %APPDATA%\Python (NOT visible to it).
+# "It imports in my shell" said nothing about whether the service could import it.
+# A dedicated venv disables user-site by default, so that whole class of bug is
+# designed out: one site-packages, account-independent, pinned, reproducible.
+#
+# HOW TO (RE)BUILD THE FLEET VENV  (non-elevated; run from the Supervisor dir)
+#   py -3.13 -m venv fleet-venv
+#   fleet-venv\Scripts\python -m pip install --upgrade pip
+#   fleet-venv\Scripts\python -m pip install -r fleet-requirements.txt
+#   fleet-venv\Scripts\python -m pip install -e E:\DevPython\SharedPyLib   # jwc_pylib (editable)
+# Then point the nssm service at fleet-venv\Scripts\python.exe (one elevated step).
+# fleet-requirements.lock.txt holds the exact resolved versions (pip freeze) for
+# byte-for-byte reproduction; this file is the human-readable intent.
+#
+# SCOPE: only what the 22 supervised fleet parts import at runtime. Interactive
+# dev/report tools (pytest, playwright, pypdf, reportlab, matplotlib, ...) are
+# deliberately NOT here -- run those under the dev interpreter, not the fleet.
+# jwc_pylib is installed editable (see above) and brings keyring + psycopg2-binary.
+
+# --- web apps (music_explorer_pg :8001, graph_explorer_pg :8002) ---
+fastapi==0.141.1
+uvicorn==0.52.4          # launched as `python -m uvicorn ...`; not imported in code
+pydantic==2.13.5
+
+# --- HTTP clients (queues, hydrators, on-demand YouTube resolve) ---
+httpx==0.28.1
+requests==2.32.4
+
+# --- YouTube transport (ytqueue_worker) ---
+yt-dlp==2026.8.19
+curl_cffi==0.16.3        # yt-dlp impersonation extra; hardens YouTube resolves
+
+# --- audio metadata (import pipeline) ---
+mutagen==1.48.1
+tinytag==2.3.2
+
+# --- chart / web scraping (MT_songchart_harvester) ---
+beautifulsoup4==4.15.0
+
+# --- data frames (song_hydrator_collect, song_lastfm_collect) ---
+# NOTE: pandas 3.x / numpy 2.x are recent majors adopted during the 3.13 cutover.
+# Pinned here so the version is a deliberate, reviewed choice -- not "latest".
+pandas==3.0.5
+
+# --- DB + secrets (imported directly by fleet code; also jwc_pylib deps) ---
+psycopg2-binary==2.9.12
+keyring==25.7.0
