@@ -37,6 +37,30 @@ def build_runtime_logger(*, source: str) -> app_log.RuntimeAppLogger:
     )
 
 
+# Boot/resume "expected" window. When the supervisor knows the host just
+# restarted or resumed from sleep, it opens this window; WARN/ERROR lines
+# mirrored into app_event_log while it is open are stamped expected=True so the
+# ops surface folds them away as understood restart noise instead of alarming.
+# Exceptions are NOT force-marked here -- jwc_pylib.app_log.classify_expected
+# already decides those, so a real fault (permission denied, deadlock, I/O
+# error) that happens to land in the window stays unexpected. Default: closed.
+_EXPECTED_WINDOW: dict[str, object] = {"active": False, "reason": None}
+
+
+def set_expected_window(active: bool, reason: str | None = None) -> None:
+    """Open or close the boot/resume 'expected' window for mirrored log rows.
+
+    Called by the supervisor loop as it enters/leaves resume grace or its
+    startup grace. Idempotent and process-local (the handler reads it per emit).
+    """
+    _EXPECTED_WINDOW["active"] = bool(active)
+    _EXPECTED_WINDOW["reason"] = reason if active else None
+
+
+def _current_expected_window() -> tuple[bool, str | None]:
+    return bool(_EXPECTED_WINDOW["active"]), _EXPECTED_WINDOW["reason"]  # type: ignore[return-value]
+
+
 class AppLogLoggingHandler(logging.Handler):
     """Mirror stdlib log records into the shared app_event_log contract."""
 
@@ -59,18 +83,26 @@ class AppLogLoggingHandler(logging.Handler):
                 "line_no": record.lineno,
                 "pathname": record.pathname,
             }
+            window_active, window_reason = _current_expected_window()
             if record.exc_info and record.exc_info[1] is not None:
+                # Let the shared classifier judge exceptions on their own merits
+                # (the allow-list must still win inside the window).
                 self._runtime_logger.log_handled_exception(
                     record.exc_info[1],
                     event_type=self._event_type,
                     context=context,
                 )
                 return
+            # Non-exception WARN/ERROR lines (e.g. "mbqueue_worker exited
+            # code=1") carry no exception to classify, so the window is what
+            # marks them as expected restart noise.
             self._runtime_logger.log_event(
                 level=level,
                 event_type=self._event_type,
                 message=record.getMessage(),
                 context=context,
+                expected=window_active,
+                expected_reason=window_reason if window_active else None,
             )
         except Exception:
             # Logging must never recurse or stop the caller.

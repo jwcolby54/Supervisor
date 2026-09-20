@@ -44,7 +44,11 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
-from supervisor_shared_logging import AppLogLoggingHandler, build_runtime_logger
+from supervisor_shared_logging import (
+    AppLogLoggingHandler,
+    build_runtime_logger,
+    set_expected_window,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -111,6 +115,15 @@ DIAGNOSTIC_FIX_WAIT_SECONDS = 10
 # suppress restart/health decisions while the fleet wakes back up.
 RESUME_GAP_DETECTED_SECONDS = 30
 RESUME_GRACE_SECONDS = 180
+# Cold-boot grace for the ops "expected" flag only. On a reboot the supervisor
+# starts fresh (no long loop gap, so resume-grace never triggers) while
+# PostgreSQL may still be finishing startup, so the supervisor's own WARN lines
+# during this opening window -- a worker that started and immediately died on a
+# refused connection, "exited code=1" -- are understood restart noise. Rows
+# logged in this window are stamped expected=True (foldable on the ops page),
+# never dropped, and this window governs ONLY that flag, not restart/health
+# decisions (those keep their existing timing).
+STARTUP_EXPECTED_GRACE_SECONDS = 180
 
 
 # --------------------------------------------------------------------------- #
@@ -200,6 +213,29 @@ INFRA_PROBES = {
     # Future: "openwebui": probe_openwebui, "celery": probe_celery,
 }
 
+# Cap how often an infra dependency is actually probed. Many parts can declare
+# the same dependency and the loop re-checks every pass, so a live probe per
+# check fans out into a connection storm -- and for the postgres probe, a burst
+# of rejected-login lines in the PG log. Cache each probe's result so the real
+# check runs at most once per this interval no matter how many callers ask.
+# Freshness costs at most this many seconds at boot, which the ordered-start
+# design already accepts (see DEPENDENCY_POLL_SECONDS).
+INFRA_PROBE_CACHE_SECONDS = 10
+
+_infra_probe_cache: dict[str, tuple[float, tuple[bool, str]]] = {}
+
+
+def probe_infra(dep: str) -> tuple[bool, str]:
+    """Run the named infra probe, at most once per INFRA_PROBE_CACHE_SECONDS."""
+    probe = INFRA_PROBES[dep]
+    now = time.monotonic()
+    cached = _infra_probe_cache.get(dep)
+    if cached is not None and (now - cached[0]) < INFRA_PROBE_CACHE_SECONDS:
+        return cached[1]
+    result = probe()
+    _infra_probe_cache[dep] = (now, result)
+    return result
+
 
 # --------------------------------------------------------------------------- #
 # Part registry -- the fleet. Adding a worker later is adding a row here.
@@ -232,8 +268,10 @@ class PartSpec:
 
 MBQUEUE_DIR = DATASOURCE_ROOT / "MBQueue"
 FMQUEUE_DIR = DATASOURCE_ROOT / "FMQueue"
+YTQUEUE_DIR = DATASOURCE_ROOT / "YTQueue"
 MYMUSIC_ROOT = Path(r"E:\DevPython\MyMusicCollection")
 MYMUSIC_CRAWLER_DIR = MYMUSIC_ROOT / "ActiveCode" / "crawler"
+MYMUSIC_TOOLS_DIR = MYMUSIC_ROOT / "ActiveCode" / "tools"
 MYMUSIC_EXPLORER_DIR = MYMUSIC_ROOT / "ActiveCode" / "apps" / "music_explorer_pg"
 RUNTIME_OPS_SCRIPT = MYMUSIC_ROOT / "ActiveCode" / "tools" / "runtime_ops.py"
 WORKER_STATUS_PROBE = SUPERVISOR_DIR / "probe_worker_status.py"
@@ -327,6 +365,45 @@ PARTS: list[PartSpec] = [
             "1800",
         ],
         probe_cwd=FMQUEUE_DIR,
+    ),
+    # YTQueue: keyless yt-dlp search transport for the YouTube-id backfill. It has
+    # NO api_http (consumers write yt_out over direct DB), so only the drainer
+    # worker is supervised. The reaper (a MyMusic tool) scores drained responses
+    # into crawler.graph_node_youtube_cache; it is gated on the worker so the two
+    # never refresh the shared Vault-credential cache at the same instant.
+    PartSpec(
+        name="ytqueue_worker",
+        cwd=YTQUEUE_DIR,
+        argv=[PYTHON, "-m", "ytqueue.worker_main"],
+        cmdline_match="ytqueue.worker_main",
+        health_url=None,
+        requires=("vault", "postgres"),
+        probe_argv=[
+            PYTHON,
+            "-m",
+            "ytqueue.runtime_probe",
+            "--component",
+            "Worker",
+            "--heartbeat-max-seconds",
+            "180",
+            "--progress-max-seconds",
+            "1800",
+        ],
+        probe_cwd=YTQUEUE_DIR,
+    ),
+    PartSpec(
+        name="ytqueue_reaper",
+        cwd=MYMUSIC_TOOLS_DIR,
+        argv=[
+            PYTHON,
+            str(MYMUSIC_TOOLS_DIR / "yt_cache_reaper.py"),
+            "--loop",
+            "--sleep-seconds",
+            "30",
+        ],
+        cmdline_match="yt_cache_reaper.py --loop",
+        requires=("vault", "postgres"),
+        requires_parts=("ytqueue_worker",),
     ),
     PartSpec(
         name="song_hydrator_submit",
@@ -662,33 +739,6 @@ PARTS: list[PartSpec] = [
             "3600",
         ],
     ),
-    PartSpec(
-        name="song_hydrator_identity_collect",
-        cwd=MYMUSIC_CRAWLER_DIR,
-        argv=[
-            PYTHON,
-            str(MYMUSIC_CRAWLER_DIR / "MT_song_hydrator_ng.py"),
-            "--collect",
-            "--loop",
-            "--batch-limit",
-            "1",
-            "--sleep-seconds",
-            "15",
-        ],
-        cmdline_match="MT_song_hydrator_ng.py --collect --loop",
-        requires=("vault", "postgres"),
-        requires_parts=("mbqueue_api",),
-        probe_argv=[
-            PYTHON,
-            str(WORKER_STATUS_PROBE),
-            "--part-name",
-            "MT_song_hydrator_identity_collect",
-            "--heartbeat-max-seconds",
-            "180",
-            "--progress-max-seconds",
-            "3600",
-        ],
-    ),
     # Public web presence. Both apps self-bootstrap their sys.path and gate the
     # supervisor's startup on a real /health probe, so their DB init is fully
     # serialized (avoids the dynamic-cred cache race). cloudflared starts LAST so
@@ -717,6 +767,26 @@ PARTS: list[PartSpec] = [
         health_url=None,
         requires=(),
         requires_parts=("music_explorer_pg", "graph_explorer_pg"),
+    ),
+    # External lane-advancement watchdog. Deliberately declares NO
+    # `requires_parts`: every other health signal in this fleet is self-reported
+    # by the worker being judged, and on 2026-08-22 two lanes forged theirs and
+    # sat undetected for hours. This part judges lanes from outcome rows only,
+    # so it must keep running when the rest of the fleet is sick -- gating it on
+    # music_explorer_pg would silence it in exactly the case it exists for. It
+    # degrades gracefully when the ops endpoint is unreachable.
+    PartSpec(
+        name="lane_watchdog",
+        cwd=MYMUSIC_TOOLS_DIR,
+        argv=[
+            PYTHON,
+            str(MYMUSIC_TOOLS_DIR / "lane_watchdog.py"),
+            "--loop",
+            "--interval-seconds",
+            "60",
+        ],
+        cmdline_match="lane_watchdog.py --loop",
+        requires=("vault", "postgres"),
     ),
 ]
 
@@ -1243,6 +1313,24 @@ def _apply_resume_grace(states: list[PartState], gap_seconds: float, now: float)
     return grace_until
 
 
+def _expected_window_state(
+    now: float,
+    resume_grace_until: float,
+    startup_expected_until: float,
+) -> tuple[bool, str | None]:
+    """Return whether ops rows should be flagged expected right now, and why.
+
+    Open during host resume grace (sleep/wake) or the cold-boot startup grace;
+    closed otherwise. This governs only the ops-surface 'expected' flag on
+    mirrored log rows -- never restart or health timing.
+    """
+    if now < resume_grace_until:
+        return True, "host_resume_grace"
+    if now < startup_expected_until:
+        return True, "supervisor_startup"
+    return False, None
+
+
 def _reap_exited_during_resume_grace(state: PartState) -> None:
     """Release bookkeeping for a dead child without restarting during grace."""
     proc = state.proc
@@ -1725,12 +1813,20 @@ def supervise(
     dependents_map = _build_dependents_map()
     last_loop_at = time.monotonic()
     resume_grace_until = 0.0
+    # Cold-boot 'expected' window: open from process start so the opening burst
+    # of restart noise is flagged foldable on the ops page (see the constant).
+    startup_expected_until = time.monotonic() + STARTUP_EXPECTED_GRACE_SECONDS
     while not _SHUTDOWN:
         now = time.monotonic()
         loop_gap_seconds = now - last_loop_at
         last_loop_at = now
         if loop_gap_seconds >= _resume_gap_threshold_seconds():
             resume_grace_until = _apply_resume_grace(states, loop_gap_seconds, now)
+        # Keep the ops 'expected' flag in sync with the boot/resume windows.
+        window_active, window_reason = _expected_window_state(
+            now, resume_grace_until, startup_expected_until
+        )
+        set_expected_window(window_active, window_reason)
 
         monitor_companion_process(power_bridge_state)
         monitor_runtime_diagnostic(diagnostic_state)
@@ -1975,11 +2071,10 @@ def check_dependencies(spec: PartSpec) -> tuple[bool, list[str]]:
     """Probe a part's required infra once; return (all_ready, unmet_reasons)."""
     unmet: list[str] = []
     for dep in spec.requires:
-        probe = INFRA_PROBES.get(dep)
-        if probe is None:
+        if dep not in INFRA_PROBES:
             LOG.warning("%s requires unknown dependency '%s' -- ignoring", spec.name, dep)
             continue
-        ready, detail = probe()
+        ready, detail = probe_infra(dep)
         if not ready:
             unmet.append(f"{dep}: {detail}")
     return (not unmet), unmet
