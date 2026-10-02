@@ -36,6 +36,8 @@ The supervised fleet is the `PARTS` registry in `supervisor.py`. As of
  lane, added 2026-08-06)
 - song hydrator identity
 - `music_explorer_pg`
+- `graph_data_origin` (private Graph Explorer origin on port 8003)
+- `answer_desk_mcp` (shared MCP HTTP server on port 8091)
 - `graph_explorer_pg`
 - `cloudflared_tunnel`
 

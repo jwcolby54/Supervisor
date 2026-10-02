@@ -95,6 +95,8 @@ Examples:
 ```powershell
 python E:\DevPython\DataSourceQueue\Supervisor\set_maintenance.py disable mbqueue_worker "schema work"
 python E:\DevPython\DataSourceQueue\Supervisor\set_maintenance.py enable mbqueue_worker
+python E:\DevPython\DataSourceQueue\Supervisor\set_maintenance.py disable-harvest "cell hotspot - keep UI live"
+python E:\DevPython\DataSourceQueue\Supervisor\set_maintenance.py enable-harvest
 python E:\DevPython\DataSourceQueue\Supervisor\set_maintenance.py reload song_hydrator_collect "pick up code"
 python E:\DevPython\DataSourceQueue\Supervisor\set_maintenance.py reload-hydrators "reload crawler workers"
 python E:\DevPython\DataSourceQueue\Supervisor\set_maintenance.py reload-supervisor "pick up supervisor.py"
@@ -104,6 +106,22 @@ Flag directories:
 
 - `control\disabled\`
 - `control\reload\`
+
+### Pause Harvesting While Keeping The UI Live
+
+The internet-data consumers are the hydrator lanes (song, album, artist,
+Last.fm) plus the MB/FM queue workers. The web-facing parts (music explorer,
+graph explorer, cloudflared tunnel) are separate supervisor parts and stay up
+when harvesting is paused.
+
+```powershell
+python E:\DevPython\DataSourceQueue\Supervisor\set_maintenance.py disable-harvest "on hotspot"
+python E:\DevPython\DataSourceQueue\Supervisor\set_maintenance.py enable-harvest
+```
+
+Confirm with `set_maintenance.py status`: the harvest parts show DISABLED while
+`graph_explorer_pg`, `music_explorer_pg`, and `cloudflared_tunnel` remain
+enabled.
 
 ## Populate LocalSystem Keyring
 

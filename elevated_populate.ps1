@@ -17,3 +17,11 @@ schtasks /delete /tn $tn /f
 
 Remove-Item $bridge -Force -ErrorAction SilentlyContinue
 Write-Output "populate flow done; bridge file removed"
+
+# The MCP's MusicBrainz mirror reader is a separate credential from Vault's
+# operator material. Populate it through the same SYSTEM-keyring boundary so
+# the supervised MCP can query the mirror after a reboot or credential rotation.
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$dir\elevated_populate_mb_reader.ps1"
+if ($LASTEXITCODE -ne 0) {
+    throw "MusicBrainz reader keyring population failed"
+}

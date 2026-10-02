@@ -101,6 +101,9 @@ Current important edges:
 - MusicBrainz crawler lanes depend on `mbqueue_api`
 - Last.fm crawler lanes depend on `fmqueue_api`
 - `cloudflared_tunnel` depends on both local web apps
+- `answer_desk_mcp` depends on the private Graph Explorer data origin
+- public `graph_explorer_pg` depends on both `graph_data_origin` and
+  `answer_desk_mcp`
 
 This prevents a post-reboot or mid-run failure from turning into repeated local
 connection-refused churn where a crawler worker keeps trying to use a queue API
@@ -130,6 +133,8 @@ Owned parts include:
 - `song_hydrator_identity_submit`
 - `song_hydrator_identity_collect`
 - `music_explorer_pg`
+- `graph_data_origin` (private direct-read Graph Explorer origin on port 8003)
+- `answer_desk_mcp` (shared MCP data boundary on port 8091)
 - `graph_explorer_pg`
 - `cloudflared_tunnel`
 

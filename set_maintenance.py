@@ -6,6 +6,8 @@ Usage examples:
     python set_maintenance.py enable mbqueue_worker
     python set_maintenance.py disable-all "planned maintenance"
     python set_maintenance.py enable-all
+    python set_maintenance.py disable-harvest "cell hotspot - keep UI live"
+    python set_maintenance.py enable-harvest
     python set_maintenance.py reload song_hydrator_collect "pick up code"
     python set_maintenance.py reload-hydrators "reload crawler hydrators"
     python set_maintenance.py reload-supervisor "pick up supervisor.py"
@@ -34,7 +36,16 @@ HYDRATOR_PARTS = [
     "album_hydrator_collect",
     "album_hydrator_hydrate",
     "song_hydrator_identity_submit",
-    "song_hydrator_identity_collect",
+    # song_hydrator_identity_collect is retired (merged into the songchart
+    # harvester's single 'song' collector); the supervisor launches no such part.
+]
+
+# The behind-the-scenes internet-data consumers: every hydrator lane plus the
+# MB/FM queue workers. The web UI parts (graph_explorer_pg, music_explorer_pg,
+# cloudflared_tunnel) are intentionally NOT included so the site stays reachable.
+HARVEST_PARTS = HYDRATOR_PARTS + [
+    "mbqueue_worker",
+    "fmqueue_worker",
 ]
 
 
@@ -119,6 +130,20 @@ def cmd_enable_all() -> int:
     return 0
 
 
+def cmd_disable_harvest(reason: str) -> int:
+    for name in HARVEST_PARTS:
+        _write_flag(_part_flag(name), reason)
+    print(f"disabled {len(HARVEST_PARTS)} harvest parts")
+    return 0
+
+
+def cmd_enable_harvest() -> int:
+    for name in HARVEST_PARTS:
+        _remove_flag(_part_flag(name))
+    print(f"enabled {len(HARVEST_PARTS)} harvest parts")
+    return 0
+
+
 def cmd_reload(name: str, reason: str) -> int:
     if name not in KNOWN_PARTS:
         raise SystemExit(f"Unknown part: {name}")
@@ -158,6 +183,11 @@ def main() -> int:
 
     sub.add_parser("enable-all")
 
+    p_disable_harvest = sub.add_parser("disable-harvest")
+    p_disable_harvest.add_argument("reason", nargs="?", default="")
+
+    sub.add_parser("enable-harvest")
+
     p_reload = sub.add_parser("reload")
     p_reload.add_argument("part")
     p_reload.add_argument("reason", nargs="?", default="")
@@ -179,6 +209,10 @@ def main() -> int:
         return cmd_disable_all(args.reason)
     if args.command == "enable-all":
         return cmd_enable_all()
+    if args.command == "disable-harvest":
+        return cmd_disable_harvest(args.reason)
+    if args.command == "enable-harvest":
+        return cmd_enable_harvest()
     if args.command == "reload":
         return cmd_reload(args.part, args.reason)
     if args.command == "reload-hydrators":

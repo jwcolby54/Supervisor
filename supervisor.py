@@ -264,15 +264,18 @@ class PartSpec:
     # containing at least {"ok": bool, "reason": "..."}.
     probe_argv: Optional[list[str]] = None
     probe_cwd: Optional[Path] = None
+    environment: dict[str, str] = field(default_factory=dict)
 
 
 MBQUEUE_DIR = DATASOURCE_ROOT / "MBQueue"
 FMQUEUE_DIR = DATASOURCE_ROOT / "FMQueue"
 YTQUEUE_DIR = DATASOURCE_ROOT / "YTQueue"
 MYMUSIC_ROOT = Path(r"E:\DevPython\MyMusicCollection")
+MUSICBRAINZ_ROOT = Path(r"D:\MusicBrainz\musicbrainz-wiki")
 MYMUSIC_CRAWLER_DIR = MYMUSIC_ROOT / "ActiveCode" / "crawler"
 MYMUSIC_TOOLS_DIR = MYMUSIC_ROOT / "ActiveCode" / "tools"
 MYMUSIC_EXPLORER_DIR = MYMUSIC_ROOT / "ActiveCode" / "apps" / "music_explorer_pg"
+ANSWER_DESK_MCP_SCRIPT = MUSICBRAINZ_ROOT / "tools" / "answer_desk_mcp_server.py"
 RUNTIME_OPS_SCRIPT = MYMUSIC_ROOT / "ActiveCode" / "tools" / "runtime_ops.py"
 WORKER_STATUS_PROBE = SUPERVISOR_DIR / "probe_worker_status.py"
 # Public web presence: the two Explorer apps and the Cloudflare tunnel that
@@ -752,12 +755,44 @@ PARTS: list[PartSpec] = [
         requires=("vault", "postgres"),
     ),
     PartSpec(
+        name="graph_data_origin",
+        cwd=MYMUSIC_EXPLORER_DIR,
+        argv=[PYTHON, "-m", "uvicorn", "graph_prototype:app", "--host", "127.0.0.1", "--port", "8003"],
+        cmdline_match="graph_prototype:app --host 127.0.0.1 --port 8003",
+        health_url="http://127.0.0.1:8003/health",
+        requires=("vault", "postgres"),
+        environment={"MUSICXPLORE_GRAPH_ROLE": "origin"},
+    ),
+    PartSpec(
+        name="answer_desk_mcp",
+        cwd=MUSICBRAINZ_ROOT,
+        argv=[
+            PYTHON,
+            str(ANSWER_DESK_MCP_SCRIPT),
+            "--transport",
+            "http",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8091",
+            "--provider",
+            "fact_packet",
+        ],
+        cmdline_match="answer_desk_mcp_server.py --transport http",
+        health_url="http://127.0.0.1:8091/health",
+        requires=("vault", "postgres"),
+        requires_parts=("graph_data_origin",),
+        environment={"MUSICXPLORE_GRAPH_ORIGIN_URL": "http://127.0.0.1:8003"},
+    ),
+    PartSpec(
         name="graph_explorer_pg",
         cwd=MYMUSIC_EXPLORER_DIR,
         argv=[PYTHON, "-m", "uvicorn", "graph_prototype:app", "--host", "127.0.0.1", "--port", "8002"],
-        cmdline_match="graph_prototype:app",
+        cmdline_match="graph_prototype:app --host 127.0.0.1 --port 8002",
         health_url="http://127.0.0.1:8002/health",
         requires=("vault", "postgres"),
+        requires_parts=("graph_data_origin", "answer_desk_mcp"),
+        environment={"MUSICXPLORE_GRAPH_ROLE": "facade"},
     ),
     PartSpec(
         name="cloudflared_tunnel",
@@ -1052,6 +1087,7 @@ def start_part(state: PartState) -> None:
             stdout=log_file,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
+            env={**os.environ, **spec.environment},
         )
     except Exception as exc:  # noqa: BLE001
         LOG.error("failed to start %s: %r", spec.name, exc)
