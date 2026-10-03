@@ -2,7 +2,8 @@
   "repos": [
     {
       "name": "Supervisor",
-      "wiki_root": "E:\\DevPython\\DataSourceQueue\\Supervisor\\SupervisorWiki\\wiki"
+      "wiki_root": "E:\\DevPython\\DataSourceQueue\\Supervisor\\SupervisorWiki\\wiki",
+      "frontmatter": "require"
     }
   ]
 }

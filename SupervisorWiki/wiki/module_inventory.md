@@ -1,5 +1,11 @@
+---
+type: reference
+title: Module Inventory
+description: Complete inventory of the current Supervisor Python code root.
+tags: [Supervisor]
+---
+
 # Module Inventory
-> Complete inventory of the current Supervisor Python code root.
 
 ## Purpose
 

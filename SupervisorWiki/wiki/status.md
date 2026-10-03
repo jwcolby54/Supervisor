@@ -1,5 +1,11 @@
+---
+type: status
+title: Status
+description: Current implementation state and known documentation/code nuances for the MusicApp Supervisor project.
+tags: [Supervisor]
+---
+
 # Status
-> Current implementation state and known documentation/code nuances for the MusicApp Supervisor project.
 
 ## Build State
 

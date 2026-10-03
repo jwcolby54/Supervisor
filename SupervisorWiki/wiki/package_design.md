@@ -1,5 +1,11 @@
+---
+type: reference
+title: Package Design
+description: Script-by-script map of the MusicApp Supervisor project and how the pieces fit together.
+tags: [Supervisor]
+---
+
 # Package Design
-> Script-by-script map of the MusicApp Supervisor project and how the pieces fit together.
 
 ## Purpose
 

@@ -1,5 +1,11 @@
+---
+type: procedure
+title: Operations Runbook
+description: Operator-first checks and control flows for the MusicApp Supervisor project.
+tags: [Supervisor]
+---
+
 # Operations Runbook
-> Operator-first checks and control flows for the MusicApp Supervisor project.
 
 ## Quick Checks
 

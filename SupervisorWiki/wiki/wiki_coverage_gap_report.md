@@ -1,5 +1,11 @@
+---
+type: reference
+title: Wiki Coverage Gap Report
+description: Python inventory coverage check for the live Supervisor codebase.
+tags: [Supervisor]
+---
+
 # Wiki Coverage Gap Report
-> Python inventory coverage check for the live Supervisor codebase.
 
 ## Scope Checked
 

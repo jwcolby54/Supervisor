@@ -1,5 +1,11 @@
+---
+type: procedure
+title: Quick Start
+description: Scenario-based front door for the MusicApp Supervisor project.
+tags: [Supervisor]
+---
+
 # Quick Start
-> Scenario-based front door for the MusicApp Supervisor project.
 
 ## If You Need To...
 

@@ -1,5 +1,11 @@
+---
+type: reference
+title: AI Wiki Contract
+description: Local adoption of the shared AI wiki contract for the MusicApp Supervisor project.
+tags: [Supervisor]
+---
+
 # AI Wiki Contract
-> Local adoption of the shared AI wiki contract for the MusicApp Supervisor project.
 
 Supervisor adopts the shared documentation standard defined in:
 

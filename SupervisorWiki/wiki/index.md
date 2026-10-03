@@ -1,5 +1,11 @@
+---
+type: index
+title: Supervisor Wiki -- Index
+description: Master index of all wiki pages for the MusicApp Supervisor project.
+tags: [Supervisor]
+---
+
 # Supervisor Wiki -- Index
-> Master index of all wiki pages for the MusicApp Supervisor project.
 
 Repo entry point: `E:\DevPython\DataSourceQueue\Supervisor\`
 If you are not sure where to begin, start at [[quick_start]].

@@ -1,5 +1,12 @@
+---
+type: concept
+title: Overview
+description: What the MusicApp Supervisor is, why it exists, and how it keeps the always-on fleet alive.
+resource: E:\DevPython\DataSourceQueue\Supervisor\supervisor.py
+tags: [Supervisor]
+---
+
 # Overview
-> What the MusicApp Supervisor is, why it exists, and how it keeps the always-on fleet alive.
 
 ## What This Is
 

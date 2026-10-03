@@ -1,5 +1,11 @@
+---
+type: procedure
+title: Maintenance
+description: "Supervisor maintenance checklist: local commands, wiki refresh targets, and the operator/error-handling scripts to review before push."
+tags: [Supervisor]
+---
+
 # Maintenance
-> Supervisor maintenance checklist: local commands, wiki refresh targets, and the operator/error-handling scripts to review before push.
 
 ## Purpose
 
